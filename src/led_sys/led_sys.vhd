@@ -126,7 +126,7 @@ cons_lo_seg0 <= lsn_lob;--"01011100";  -- small o
 
 process (clk)  --enable the scanning while in reset 
 begin  -- process
-  if clk'event and clk = '1' then    -- rising clock edge
+  if clk'event and clk = '0' then    -- rising clock edge
 	 disp_cnt <= disp_cnt + 1;
   end if;
 end process;
