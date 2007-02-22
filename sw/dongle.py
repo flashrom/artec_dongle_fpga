@@ -57,10 +57,10 @@ def usage(s):
     print " -d        Debug"
     print " -q        Query"
     print " -r        Readback "
+    print " -e        Erase device "    
     print ""    
     print "Board test options: "
     print " -t        Marching one and zero test address + data (Device must be empty)"
-    print " -e        Erase before test "
     print " -b        Leave flash blanc after test "
     print ""       
     print "Examples:"
@@ -118,7 +118,17 @@ class Dongle:
         except:
             print "Unable to open port"
             sys.exit();
-        
+
+    def testReturn(self,byteCount):
+        i=0
+        while don.tty.inWaiting()<byteCount:
+            i=i+1
+            if i==10000*byteCount:
+                break
+        if i==10000*byteCount:
+            return 0
+        return don.tty.inWaiting()  ## ret two bytes            
+            
     def getReturn(self,byteCount):
         i=0
         while don.tty.inWaiting()<byteCount:
@@ -126,9 +136,10 @@ class Dongle:
             if i==10000*byteCount:
                 break
         if i==10000*byteCount:
-            print "Dongle not connected to port or not communicating"
-            sys.exit()  
+            print "Dongle not communicating"
+            sys.exit()
         return don.tty.read(byteCount)  ## ret two bytes
+    
 
     def write_command(self,command):
         lsb = command&0xff
@@ -338,14 +349,27 @@ else:
     k10Time = time.clock() - mytime   # time per 10000 while cycles
     wait = k10Time/100000.0     # time per while cycle
     wait = (0.00025/wait) * 1.20   # count for 250us + safe margin
-    
     # ok done
-    don = Dongle(mode.portname,115200,100)
-    print wait
-    don.tty.wait = wait
-    don.write_command(0x0050) # 0x0098
-    don.write_command(0x00C5)            #send dongle check internal command
+    reopened = 0
+
+    don  = Dongle(mode.portname,115200,100)
+    don.tty.wait = wait   
+    while 1:
+        don.write_command(0x0050) # 0x0098
+        don.write_command(0x00C5)            #send dongle check internal command
+        don_ret=don.testReturn(2)
+        if don_ret==2:
+            break
+        if reopened == 3:
+             print 'Dongle connected, but does not communicate'
+             sys.exit()
+        reopened = reopened + 1
+        # reopen and do new cycle
+        don = Dongle(mode.portname,115200,100)
+        don.tty.wait = wait   
+
     buf=don.getReturn(2)  # two bytes expected to this command
+          
     if ord(buf[1])==0x32 and  ord(buf[0])==0x10:
         print "Dongle OK"
     else:
@@ -353,6 +377,11 @@ else:
  
     
 if mode.q == 1:   # perform a query from dongle
+    
+    buf=don.read_data(4,0x0)  # word count and word address
+    print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[1]),ord(buf[0]),ord(buf[3]),ord(buf[2]),ord(buf[5]),ord(buf[4]),ord(buf[7]),ord(buf[6]) )
+
+    
     don.write_command(0x0050) # 0x0098
     don.write_command(0x0098) # 0x0098
     buf=don.read_data(3,0x000010)  # word count and word address
@@ -364,12 +393,13 @@ if mode.q == 1:   # perform a query from dongle
     else:
         print "Got bad query data:"
         print 'Query address 0x10 = 0x%02x%02x '%(ord(buf[1]),ord(buf[0]))
-        print 'Query address 0x10 = 0x%02x%02x '%(ord(buf[3]),ord(buf[2]))
-        print 'Query address 0x10 = 0x%02x%02x '%(ord(buf[5]),ord(buf[4]))    
+        print 'Query address 0x12 = 0x%02x%02x '%(ord(buf[3]),ord(buf[2]))
+        print 'Query address 0x14 = 0x%02x%02x '%(ord(buf[5]),ord(buf[4]))    
         print "Read byte count:",len(buf)
  
     don.write_command(0x00FF) # 0x0098
-    buf=don.read_data(4,0xff57c0>>1)  # word count and word address     
+    buf=don.read_data(4,0xff57c0>>1)  # word count and word address
+
     print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[1]),ord(buf[0]),ord(buf[3]),ord(buf[2]),ord(buf[5]),ord(buf[4]),ord(buf[7]),ord(buf[6]) )
 
     
@@ -397,12 +427,19 @@ if mode.filename!="" and mode.address!=-1:
     endBlock = don.get_block_no(mode.address+wordSize - 1)  
     startBlock = don.get_block_no(mode.address)
     i=startBlock
+    print 'Erasing from block %i to %i '%(i,endBlock)
     while i <= endBlock:
-        print 'Erasing block %i '%(i)
+        if mode.v == 1:
+            print 'Erasing block %i '%(i)
+        else:
+            sys.stdout.write(".")
+            sys.stdout.flush()
         don.erase_block(i)
         don.wait_on_busy()
         don.parse_status()   #do this after programming all but uneaven ending
         i=i+1
+    if mode.v == 0:
+        print " "
     #don.write_command(0x00FF) # 0x0098
     #buf=don.read_data(4,0x000000)  # word count and word address     
     #print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[0]),ord(buf[1]),ord(buf[2]),ord(buf[3]),ord(buf[4]),ord(buf[5]),ord(buf[6]),ord(buf[7]) )
@@ -411,9 +448,14 @@ if mode.filename!="" and mode.address!=-1:
     f.seek(0) #seek to start
     address= mode.address
     #don.set_address(address)
+    print 'Writing %iK'%(size/1024)
     while 1:
-        if address/(1024*16) != (address-16)/(1024*16):  # get bytes from words if 512
-            print 'Progress: %iK of %iK at 0x%06x'%((address-mode.address)/512,size/1024,address)
+        if (address/(1024*64) != (address-16)/(1024*64)) and address != mode.address:  # get bytes from words if 512
+            if mode.v == 1:
+                print 'Progress: %iK of %iK at 0x%06x'%((address-mode.address)/512,size/1024,address)
+            else:
+                sys.stdout.write(".")
+                sys.stdout.flush()
         buf = f.read(32)  #16 words is maximum write here bytes are read
         if len(buf)==32:
             don.buffer_write(16,address,buf)
@@ -429,6 +471,8 @@ if mode.filename!="" and mode.address!=-1:
             break
         else:
             break
+    if mode.v == 0:
+        print " "
     print "Write DONE!"
     don.parse_status()   #do this after programming all but uneaven ending
     f.close()
@@ -437,13 +481,18 @@ if mode.r == 1:   # perform a readback
     if mode.offset!=-1 and mode.length!=-1 and mode.filename!="":
         mode.offset=mode.offset>>1    #make word offset
         mode.length= mode.length>>1   #make word length
+        print 'Reading %iK'%(mode.length/512)
         try:
             f=open(mode.filename,"wb")
             don.write_command(0x00FF) #  put flash to data read mode
             address = mode.offset    # set word address
             while 1:
                 if address/(1024*32) != (address-128)/(1024*32):  # get K bytes from words if 512
-                    print 'Progress: %iK of %iK'%((address-mode.offset)/512,mode.length/512)                
+                    if mode.v == 1:
+                        print 'Progress: %iK of %iK'%((address-mode.offset)/512,mode.length/512)
+                    else:
+                        sys.stdout.write(".")
+                        sys.stdout.flush()
                 buf=don.read_data(128,address)  # word count and byte address read 64 words to speed up
                 f.write(buf)
                 #print "from address:",address<<1," ", len(buf)
@@ -451,10 +500,13 @@ if mode.r == 1:   # perform a readback
                     break
                 address = address + 128    #this is word address
             f.close()
+            if mode.v == 0:
+                print " "            
             print "Readback done!"
         except IOError:
             print "IO Error on file open"
             sys.exit()        
+        
     else:
        print "Some of readback parameters missing..."
        print mode.offset,mode.length, mode.filename
@@ -464,6 +516,7 @@ if mode.t == 1:   # perform dongle test
         print "Dongle TEST"
         if mode.e == 1:
             #Erase Dongle
+            print "Erasing"
             don.write_command(0x0060) # 0x0098
             don.write_command(0x00D0) # 0x0098
             don.wait_on_busy()
@@ -472,11 +525,17 @@ if mode.t == 1:   # perform dongle test
             startBlock = 0
             i=startBlock
             while i <= endBlock:
-                print 'Erasing block %i '%(i)
+                if mode.v == 1:
+                    print 'Erasing block %i '%(i)
+                else:
+                     sys.stdout.write(".")
+                     sys.stdout.flush()
                 don.erase_block(i)
                 don.wait_on_busy()
                 don.parse_status()   #do this after programming all but uneaven ending
-                i=i+1    
+                i=i+1  
+            if mode.v == 0: # add CRTL return to dots
+                print ""
         #Do marching one test on data and address
         mode.length= 0   #make word length
         try:
@@ -503,6 +562,7 @@ if mode.t == 1:   # perform dongle test
                 buf2=don.read_data(1,0)  #read first byte
                 if ord(buf2[0]) != 0xFF:
                     print "Test FAIL (At least one address line const. 0)!!!!!"
+                    sys.exit()
             #-----------------------------------------------------------------------
             #Marching zero test
             address = 0xFFEFFFFF    # set word address
@@ -524,9 +584,10 @@ if mode.t == 1:   # perform dongle test
                 buf2=don.read_data(1,0x1FFFFF)  #read first byte
                 if ord(buf2[0]) != 0xFF:
                     print "Test FAIL (At least two address lines bonded)!!!!!"                
-                    
+                    sys.exit()
             if mode.b == 1:
                 #Erase Dongle
+                print "Erasing"
                 don.write_command(0x0060) # 0x0098
                 don.write_command(0x00D0) # 0x0098
                 don.wait_on_busy()
@@ -535,15 +596,45 @@ if mode.t == 1:   # perform dongle test
                 startBlock = 0
                 i=startBlock
                 while i <= endBlock:
-                    print 'Blanking block %i '%(i)
+                    if mode.v == 1:
+                        print 'Blanking block %i '%(i)
+                    else:
+                        sys.stdout.write(".")
+                        sys.stdout.flush()
                     don.erase_block(i)
                     don.wait_on_busy()
                     don.parse_status()   #do this after programming all but uneaven ending
-                    i=i+1                    
+                    i=i+1
+                if mode.v == 0:
+                    print " "
             print "Test SUCCESSFUL!"
+            sys.exit()  
         except IOError:
             print "IO Error on file open"
             sys.exit()        
 
+if mode.e == 1:   # perform dongle test
+            #Erase Dongle
+            print "Erasing all"
+            don.write_command(0x0060) # 0x0098
+            don.write_command(0x00D0) # 0x0098
+            don.wait_on_busy()
+            don.parse_status()
+            endBlock = 31
+            startBlock = 0
+            i=startBlock
+            while i <= endBlock:
+                if mode.v == 1:
+                    print 'Erasing block %i '%(i)
+                else:
+                     sys.stdout.write(".")
+                     sys.stdout.flush()
+                don.erase_block(i)
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
+                i=i+1  
+            if mode.v == 0: # add CRTL return to dots
+                print "" 
+            print "Erase done."
        
 ##########################################################

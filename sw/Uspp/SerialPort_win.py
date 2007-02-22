@@ -109,18 +109,27 @@ class SerialPort:
         self.__devName, self.__timeout, self.__speed=dev, timeout, speed
         self.__mode=mode
         self.__params=params
-        try:
-            self.__handle=CreateFile (dev,
-                                  win32con.GENERIC_READ|win32con.GENERIC_WRITE,
-                                  0, # exclusive access
-                                  None, # no security
-                                  win32con.OPEN_EXISTING,
-                                  win32con.FILE_ATTRIBUTE_NORMAL,
-                                  None)
+        self.__speed = 0
+        self.__reopen = 0
+        while 1:
+            try:
+                self.__handle=CreateFile (dev,
+                win32con.GENERIC_READ|win32con.GENERIC_WRITE,
+                0, # exclusive access
+                None, # no security
+                win32con.OPEN_EXISTING,
+                win32con.FILE_ATTRIBUTE_NORMAL,
+                None)
+                break
                         
-        except:
-            raise SerialPortException('Unable to open port')
-            
+            except:
+                n=0
+                while (n < 2000000):
+                    n += 1;                
+                self.__reopen = self.__reopen + 1
+            if self.__reopen > 32:
+                print "Port does not exist..."
+                sys.exit()
         self.__configure()
 
     def __del__(self):
@@ -129,10 +138,11 @@ class SerialPort:
         To close the serial port we have to do explicity: del s
         (where s is an instance of SerialPort)
         """
-        try:
-            CloseHandle(self.__handle)
-        except:
-            raise SerialPortException('Unable to close port')
+        if self.__speed:
+            try:
+                CloseHandle(self.__handle)
+            except:
+                raise SerialPortException('Unable to close port')
 
 
             

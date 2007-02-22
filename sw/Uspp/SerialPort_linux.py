@@ -119,10 +119,21 @@ class SerialPort:
         self.__devName, self.__timeout, self.__speed=dev, timeout, speed
         self.__mode=mode
         self.__params=params
-        try:
-	        self.__handle=os.open(dev, os.O_RDWR)
-        except:
-            raise SerialPortException('Unable to open port')
+        self.__speed = 0
+        self.__reopen = 0
+        while 1:
+            try:
+                self.__handle=os.open(dev, os.O_RDWR)
+                break
+                        
+            except:
+                n=0
+                while (n < 2000000):
+                    n += 1;                
+                self.__reopen = self.__reopen + 1
+            if self.__reopen > 32:
+                print "Port does not exist..."
+                sys.exit()
 
         self.__configure()
 
@@ -132,13 +143,12 @@ class SerialPort:
         To close the serial port we have to do explicity: del s
         (where s is an instance of SerialPort)
         """
-	
-    	tcsetattr(self.__handle, TCSANOW, self.__oldmode)
-	
-        try:
-            os.close(self.__handle)
-        except IOError:
-            raise SerialPortException('Unable to close port')
+	if self.__speed:
+            tcsetattr(self.__handle, TCSANOW, self.__oldmode)
+            try:
+                os.close(self.__handle)
+            except IOError:
+                raise SerialPortException('Unable to close port')
 
 
     def __configure(self):
