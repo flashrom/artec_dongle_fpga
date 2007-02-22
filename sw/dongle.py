@@ -26,11 +26,12 @@
 # Purpose:   Executable command line tool 
 #
 # Author:    Jüri Toomessoo <jyrit@artecdesign.ee>
-# Copyright: (c) 2006 Artec Design
+# Copyright: (c) 2006 by Artec Design
 # Licence:   LGPL
 #
 # Created:   06 Oct. 2006
 # History:   12 oct. 2006  Version 1.0 released
+#            22 Feb. 2007  Test options added to test PCB board
 #            
 #
 #-------------------------------------------------------------------------
@@ -48,6 +49,7 @@ def usage(s):
     print "Artec USB Dongle programming utility"
     print "Usage: ",s," -c comport [-fvdq] filename address"
     print "       ",s," [-fvdqr] offset length filename"
+    print ""
     print "Options:"
     print " -c        COM port"
     print " -v        Verbose"
@@ -55,6 +57,12 @@ def usage(s):
     print " -d        Debug"
     print " -q        Query"
     print " -r        Readback "
+    print ""    
+    print "Board test options: "
+    print " -t        Marching one and zero test address + data (Device must be empty)"
+    print " -e        Erase before test "
+    print " -b        Leave flash blanc after test "
+    print ""       
     print "Examples:"
     print ""
     print " ",s," -c COM3 loader.bin 0"
@@ -71,6 +79,9 @@ class DongleMode:
         self.d = 0
         self.q = 0
         self.r = 0
+        self.t = 0
+        self.e = 0
+        self.b = 0        
         self.filename=""
         self.portname=""
         self.address=-1
@@ -256,10 +267,12 @@ mode = DongleMode()
 # PARSE ARGUMENTS 
 for arg in sys.argv:
     if len(sys.argv) == 1: # if no arguments display help
-       usage(sys.argv[0])
+       #usage(sys.argv[0])
+       usage("dongle.py")
        sys.exit()        
     if arg in ("-h","--help","/help","/h"):
-        usage(sys.argv[0])
+        #usage(sys.argv[0])
+        usage("dongle.py")
         sys.exit()
     if arg in ("-c"):
         last_ops = sys.argv.index(arg) + 1  #if remains last set of options from here start ordered strings
@@ -280,7 +293,13 @@ for arg in sys.argv:
             if op=="d":
                 mode.d = 1
             if op=="r":
-                mode.r = 1                
+                mode.r = 1
+            if op=="t":
+                mode.t = 1  
+            if op=="e":
+                mode.e = 1   
+            if op=="b":
+                mode.b = 1                   
     else:
         i = sys.argv.index(arg)
         if i ==  last_ops + 1:
@@ -440,5 +459,91 @@ if mode.r == 1:   # perform a readback
        print "Some of readback parameters missing..."
        print mode.offset,mode.length, mode.filename
        sys.exit()  
-    
+
+if mode.t == 1:   # perform dongle test
+        print "Dongle TEST"
+        if mode.e == 1:
+            #Erase Dongle
+            don.write_command(0x0060) # 0x0098
+            don.write_command(0x00D0) # 0x0098
+            don.wait_on_busy()
+            don.parse_status()
+            endBlock = 31
+            startBlock = 0
+            i=startBlock
+            while i <= endBlock:
+                print 'Erasing block %i '%(i)
+                don.erase_block(i)
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
+                i=i+1    
+        #Do marching one test on data and address
+        mode.length= 0   #make word length
+        try:
+            #Marching one test
+            #---------------------------------------------------------------------------
+            address = 0x100000    # set word address
+            data = 0x100000
+            while mode.length<20: # last address to test 0x20 0000  
+                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
+                don.buffer_write(2,address,buf1)
+                don.parse_status()   #do this after programming all but uneaven ending
+                don.write_command(0x00FF) #  put flash to data read mode   
+                buf2=don.read_data(2,address)  # word count and byte address read 64 words to speed up
+                if buf1 != buf2:
+                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
+                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
+                    print "Test FAIL!!!!!"
+                    sys.exit()
+                address = address >> 1
+                if address == 0x2:
+                    address = address >> 1  # 0x2 is written and will return zero on read as write new write will fail
+                data = data >> 1
+                mode.length =  mode.length + 1
+                buf2=don.read_data(1,0)  #read first byte
+                if ord(buf2[0]) != 0xFF:
+                    print "Test FAIL (At least one address line const. 0)!!!!!"
+            #-----------------------------------------------------------------------
+            #Marching zero test
+            address = 0xFFEFFFFF    # set word address
+            data = 0x100000
+            while mode.length<18: # last address to test 0x20 0000  
+                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
+                don.buffer_write(2,address,buf1)
+                don.parse_status()   #do this after programming all but uneaven ending
+                don.write_command(0x00FF) #  put flash to data read mode   
+                buf2=don.read_data(2,address&0x1FFFFF)  # word count and byte address read 64 words to speed up
+                if buf1 != buf2:
+                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
+                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
+                    print "Test FAIL!!!!!"
+                    sys.exit()
+                address = (address >> 1)|0xFF000000
+                data = data >> 1
+                mode.length =  mode.length + 1
+                buf2=don.read_data(1,0x1FFFFF)  #read first byte
+                if ord(buf2[0]) != 0xFF:
+                    print "Test FAIL (At least two address lines bonded)!!!!!"                
+                    
+            if mode.b == 1:
+                #Erase Dongle
+                don.write_command(0x0060) # 0x0098
+                don.write_command(0x00D0) # 0x0098
+                don.wait_on_busy()
+                don.parse_status()
+                endBlock = 31
+                startBlock = 0
+                i=startBlock
+                while i <= endBlock:
+                    print 'Blanking block %i '%(i)
+                    don.erase_block(i)
+                    don.wait_on_busy()
+                    don.parse_status()   #do this after programming all but uneaven ending
+                    i=i+1                    
+            print "Test SUCCESSFUL!"
+        except IOError:
+            print "IO Error on file open"
+            sys.exit()        
+
+       
 ##########################################################
