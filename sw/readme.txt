@@ -4,7 +4,7 @@ and usually python is included.
 
 
 Windows:
-To used the python script on windows
+To use the python script on windows
 Python for Windows extensions have to be installed
 
 http://sourceforge.net/projects/pywin32
