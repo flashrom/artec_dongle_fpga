@@ -46,7 +46,7 @@ from Uspp.uspp import *
 
 #### global funcs ####
 def usage(s):
-    print "Artec USB Dongle programming utility"
+    print "Artec USB Dongle programming utility ver. 1.1"
     print "Usage: ",s," -c comport [-fvdq] filename address"
     print "       ",s," [-fvdqr] offset length filename"
     print ""
@@ -379,9 +379,6 @@ else:
 if mode.q == 1:   # perform a query from dongle
     
     buf=don.read_data(4,0x0)  # word count and word address
-    print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[1]),ord(buf[0]),ord(buf[3]),ord(buf[2]),ord(buf[5]),ord(buf[4]),ord(buf[7]),ord(buf[6]) )
-
-    
     don.write_command(0x0050) # 0x0098
     don.write_command(0x0098) # 0x0098
     buf=don.read_data(3,0x000010)  # word count and word address

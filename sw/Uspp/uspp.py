@@ -184,10 +184,33 @@ __version__="0.1"
 
 
 import sys
-
+drv_ok = 0
 if sys.platform=='win32':
-    from SerialPort_win import *
+    print "Windows platform detected:"
+    #try:
+    #    import notworking_d2xx
+    #    from D2xxPort_win import *
+    #    print "Using D2xx FTDI driver"
+    #    drv_ok = 1
+    #except ImportError:
+    #    print "pyUSB for fast COM not found (see http://bleyer.org/pyusb/)"
+    
+    if drv_ok == 0:
+        try:
+            from win32file import *
+            from win32event import *
+            from SerialPort_win import *
+            print "Using VCP FTDI driver"
+        except ImportError,D2xxPortException:        
+            print "Python for winiows extensions for COM not found" 
+            print "(see https://sourceforge.net/projects/pywin32/)"
+            print "Could not find any usable support for FTDI chip in python"
+            print "Try installing python support from one of the links."
+            sys.exit()
+        
+        
 elif sys.platform=='linux2':
+    print "Linux platform detected:"
     from SerialPort_linux import *
 else:
     sys.exit('Sorry, no implemented for this platform yet')
