@@ -272,7 +272,7 @@ class SerialPort:
                     WriteFile(self.__handle, pack('2c', buffer[a], buffer[a+1]), overlapped)
                 else:
                      WriteFile(self.__handle, pack('2c', buffer[a], chr(0xFF)), overlapped)
-                a+=2;       
+                a+=2       
         else:
             overlapped=OVERLAPPED()
             overlapped.hEvent=CreateEvent(None, 0,0, None)
