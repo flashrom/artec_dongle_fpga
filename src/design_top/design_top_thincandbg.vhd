@@ -252,7 +252,7 @@ LEDS: led_sys   --toplevel for led system
 	msn_hib => "01111111",--8  --Most signif. of hi byte  
 	lsn_hib => "01111101",--6   --Least signif. of hi byte
  	msn_lob => "10111111",--0  --Most signif. of hi byte   This is version code
-	lsn_lob => "01011011" --2   --Least signif. of hi byte	This is version code
+	lsn_lob => "01001111" --3   --Least signif. of hi byte	This is version code
   )
   port map(
     clk				=> sys_clk , -- in std_logic;
@@ -268,7 +268,7 @@ LEDS: led_sys   --toplevel for led system
 --MAIN DATAPATH CONNECTIONS
 --LPC bus logic
 lad_i <= lad;
-lad <=	lad_o when lad_oe='1' and mode/="00" else --mode "00" is post code spy mode 
+lad <=	lad_o when lad_oe='1' else
 		(others=>'Z');
 
 --END LPC bus logic
