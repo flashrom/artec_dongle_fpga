@@ -128,20 +128,20 @@ fl_addr[20]                  : 68        : output : LVCMOS            :         
 fl_addr[21]                  : 69        : output : LVCMOS            :         : 4         : Y              
 fl_addr[22]                  : 70        : output : LVCMOS            :         : 4         : Y              
 fl_addr[0]                   : 71        : output : LVCMOS            :         : 4         : Y              
-fl_rp_n                      : 72        : output : LVCMOS            :         : 4         : N              
-hdr[10]                      : 73        : output : LVCMOS            :         : 3         : Y              
-hdr[9]                       : 74        : output : LVCMOS            :         : 3         : Y              
-hdr[8]                       : 75        : output : LVCMOS            :         : 3         : Y              
-hdr[7]                       : 76        : output : LVCMOS            :         : 3         : Y              
-hdr[6]                       : 77        : output : LVCMOS            :         : 3         : Y              
-hdr[5]                       : 78        : output : LVCMOS            :         : 3         : Y              
-hdr[4]                       : 79        : output : LVCMOS            :         : 3         : Y              
+seg_out[7]                   : 72        : output : LVCMOS            :         : 4         : N              
+hdr[10]                      : 73        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[9]                       : 74        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[8]                       : 75        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[7]                       : 76        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[6]                       : 77        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[5]                       : 78        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[4]                       : 79        : bidir  : LVCMOS            :         : 3         : Y              
 GND                          : 80        : gnd    :                   :         :           :                
 VCCIO3                       : 81        : power  :                   : 3.3V    : 3         :                
-hdr[3]                       : 82        : output : LVCMOS            :         : 3         : Y              
-hdr[2]                       : 83        : output : LVCMOS            :         : 3         : Y              
-hdr[1]                       : 84        : output : LVCMOS            :         : 3         : Y              
-hdr[0]                       : 85        : output : LVCMOS            :         : 3         : Y              
+hdr[3]                       : 82        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[2]                       : 83        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[1]                       : 84        : bidir  : LVCMOS            :         : 3         : Y              
+hdr[0]                       : 85        : bidir  : LVCMOS            :         : 3         : Y              
 CONF_DONE                    : 86        :        :                   :         : 3         :                
 nSTATUS                      : 87        :        :                   :         : 3         :                
 TCK                          : 88        : input  :                   :         : 3         :                
@@ -176,7 +176,7 @@ GND                          : 116       : gnd    :                   :         
 VCCINT                       : 117       : power  :                   : 1.5V    :           :                
 GND                          : 118       : gnd    :                   :         :           :                
 fl_oe_n                      : 119       : output : LVCMOS            :         : 2         : Y              
-seg_out[7]                   : 120       : output : LVCMOS            :         : 2         : N              
+fl_rp_n                      : 120       : output : LVCMOS            :         : 2         : N              
 fl_data[15]                  : 121       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[7]                   : 122       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[14]                  : 123       : bidir  : LVCMOS            :         : 2         : Y              

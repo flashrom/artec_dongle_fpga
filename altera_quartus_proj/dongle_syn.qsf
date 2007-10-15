@@ -159,3 +159,4 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to scn_seg
 set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to seg_out
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to usb_rd_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to usb_wr
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to hdr[3]
