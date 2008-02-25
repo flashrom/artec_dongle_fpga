@@ -107,7 +107,11 @@ begin  -- process LPC
     data_valid <='1';
     lad_rising_o<="0000";
     lpc_val <='0';
+	lpc_wr <='0';
+	r_lad <= (others=>'0');
+	cycle_type <= (others=>'0');
 	r_addr <= (others=>'0');
+	r_cnt <= (others=>'0');
    elsif lclk'event and lclk = '1' then  -- rising clock edge
     case CS is
       when RESETs => ----------------------------------------------------------
