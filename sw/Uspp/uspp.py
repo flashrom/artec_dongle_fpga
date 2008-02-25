@@ -1,6 +1,6 @@
 #! /usr/bin/env python
+# -*- coding: ISO-8859-1 -*-
 
-# -*- coding: iso-8859-1 -*-
 
 ##########################################################################
 # USPP Library (Universal Serial Port Python Library)
@@ -201,7 +201,7 @@ if sys.platform=='win32':
             from win32event import *
             from SerialPort_win import *
             print "Using VCP FTDI driver"
-        except ImportError,D2xxPortException:        
+        except ImportError,SerialPortException:        
             print "Python for winiows extensions for COM not found" 
             print "(see https://sourceforge.net/projects/pywin32/)"
             print "Could not find any usable support for FTDI chip in python"
@@ -213,4 +213,4 @@ elif sys.platform=='linux2':
     print "Linux platform detected:"
     from SerialPort_linux import *
 else:
-    sys.exit('Sorry, no implemented for this platform yet')
+    sys.exit('Sorry, no implementation for this platform yet')

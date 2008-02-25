@@ -1,4 +1,4 @@
-# -*- coding: iso-8859-1 -*-
+# -*- coding: ISO-8859-1 -*-
 
 ##########################################################################
 # USPP Library (Universal Serial Port Python Library)
@@ -61,7 +61,8 @@ class SerialPortException(exceptions.Exception):
     """Exception raise in the SerialPort methods"""
     def __init__(self, args=None):
         self.args=args
-
+    def __str__(self):
+        return repr(self.args)
 
 class SerialPort:
     """Encapsulate methods for accesing to a serial port."""
@@ -115,7 +116,7 @@ class SerialPort:
         initialization.
 
         """
-        self.wait = 1024
+
         self.__devName, self.__timeout, self.__speed=dev, timeout, speed
         self.__mode=mode
         self.__params=params
@@ -133,7 +134,8 @@ class SerialPort:
                 self.__reopen = self.__reopen + 1
             if self.__reopen > 32:
                 print "Port does not exist..."
-                sys.exit()
+                raise SerialPortException('Port does not exist...')
+                break
 
         self.__configure()
 
@@ -254,43 +256,6 @@ class SerialPort:
         """Write the string s to the serial port"""
 
         os.write(self.__handle, s)
-
-    def write_2bytes(self, msb,lsb): 
-        os.write(self.__handle,  pack('BB', msb, lsb))
-
-    def write_word(self, word):
-        os.write(self.__handle,  pack('h', word))
-        
-    def write_buf_cmd(self, buffer):
-        a=0
-	if (len(buffer) < 44):  # if buffer is shorter than expected then pad with read array mode commands
-            while(a < len(buffer)):
-                if a < 10:
-                    os.write(self.__handle, pack('2c', buffer[a], buffer[a+1]))
-                elif a < len(buffer)-2:
-                    os.write(self.__handle, pack('2c', buffer[a+1], buffer[a]))    
-                elif  len(buffer)==2:
-                    os.write(self.__handle, pack('2c', buffer[a], buffer[a+1]))
-                else:
-                    os.write(self.__handle, pack('2c', buffer[a],chr(0xFF)))
-                a+=2;       
-        else:
-            #first 10 bytes are in correct order + 32 data bytes are in wrong order and + 2 confirm bytes are in correct order
-            os.write(self.__handle, pack('44c', 
-            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
-            buffer[8], buffer[9], buffer[11], buffer[10], buffer[13], buffer[12], buffer[15], buffer[14],
-            buffer[17], buffer[16], buffer[19], buffer[18], buffer[21], buffer[20], buffer[23], buffer[22],
-            buffer[25], buffer[24], buffer[27], buffer[26], buffer[29], buffer[28], buffer[31], buffer[30],
-            buffer[33], buffer[32], buffer[35], buffer[34], buffer[37], buffer[36], buffer[39], buffer[38],
-            buffer[41], buffer[40], buffer[42], buffer[43]
-            ))
-  
-        # linux driver is way faster than windows driver total delay needed for flash buffer write is typ 210 us
-	n = 0
-	cyc = self.wait*7
-	while (n < cyc):
-		n += 1;
-        
         
     def inWaiting(self):
         """Returns the number of bytes waiting to be read"""

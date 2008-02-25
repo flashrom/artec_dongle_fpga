@@ -63,8 +63,8 @@ entity design_top is
 	--system signals
 	sys_clk    : in    std_logic;         --25 MHz clk
 	resetn     : in    std_logic;     
-	hdr		   : out    std_logic_vector(10 downto 0);
-	--alt_clk    : out    std_logic;    --alternative clock from extention header
+	hdr		   : inout    std_logic_vector(10 downto 0);
+	--alt_clk    : out    std_logic;    
 	mode       : in    std_logic_vector(1 downto 0);  --sel upper addr bits
     --lpc slave interf
     lad        : inout std_logic_vector(3 downto 0);
@@ -119,6 +119,8 @@ component lpc_iow
     --system signals
     lreset_n   : in  std_logic;
     lclk       : in  std_logic;
+	lena_mem_r : in  std_logic;  --enable full adress range covering memory read block
+	lena_reads : in  std_logic;  --enable read capabilities
 	--LPC bus from host
     lad_i      : in  std_logic_vector(3 downto 0);
     lad_o      : out std_logic_vector(3 downto 0);
@@ -199,7 +201,8 @@ signal 	  lpc_data_i : std_logic_vector(7 downto 0);
 signal    lpc_wr     : std_logic;        --shared write not read
 signal    lpc_ack    : std_logic;
 signal    lpc_val    : std_logic;
-
+signal    lena_mem_r : std_logic;  --enable full adress range covering memory read block
+signal    lena_reads : std_logic;  --enable/disables all read capabilty to make the device post code capturer
 
 signal    c25_lpc_val  : std_logic;
 signal    c25_lpc_wr     : std_logic;        --shared write not read
@@ -236,7 +239,14 @@ signal    enable_4meg: std_logic;
 
 begin
 
+--GPIO PINS START
 
+hdr(2) <= '0'; --create low pin for jumper pair 5-6 (this pin is 6 on J1 header)
+hdr(0) <= 'Z';
+lena_mem_r <= not hdr(0); -- disabled if jumper is not on header pins 1-2
+lena_reads <= hdr(3); -- disabled if jumper is on (jumper makes it a postcode only device)
+
+--GPIO PINS END
 
 --LED SUBSYSTEM START
 
@@ -252,7 +262,8 @@ LEDS: led_sys   --toplevel for led system
 	msn_hib => "01111111",--8  --Most signif. of hi byte  
 	lsn_hib => "01111101",--6   --Least signif. of hi byte
  	msn_lob => "10111111",--0  --Most signif. of hi byte   This is version code
-	lsn_lob => "01001111" --3   --Least signif. of hi byte	This is version code
+	--lsn_lob => "01001111" --3   --Least signif. of hi byte	This is version code
+	lsn_lob => "01100110" --4   --Least signif. of hi byte	This is version code
   )
   port map(
     clk				=> sys_clk , -- in std_logic;
@@ -278,6 +289,8 @@ LPCBUS : lpc_iow
     --system signals
     lreset_n   => lreset_n, -- in  std_logic;
     lclk       => lclk, -- in  std_logic;
+	lena_mem_r => lena_mem_r,--: in  std_logic;  --enable full adress range covering memory read block
+	lena_reads => lena_reads, -- : in  std_logic;  --enable read capabilities, : in  std_logic;  --enable read capabilities
 	--LPC bus from host
     lad_i      => lad_i, -- in  std_logic_vector(3 downto 0);
     lad_o      => lad_o, -- out std_logic_vector(3 downto 0);
@@ -395,31 +408,6 @@ FLASH : flash_if
     mem_ack   => mem_ack  -- out std_logic
     ); 
 
---hdr(7 downto 0) <= umem_do(7 downto 0) when  umem_ack='0' and umem_wr='1' else
---				   umem_do(15 downto 8) when  umem_ack='1' and umem_wr='1' else
---				   mem_do(7 downto 0) when  umem_wr='0' else
---				   mem_do(15 downto 8);
---hdr(8)<= umem_wr;
---hdr(9)<= umem_val;
---hdr(10)<= umem_ack;
---    usb_rd_n   : out  std_logic;  -- enables out data if low (next byte detected by edge / in usb chip)
---    usb_wr     : out  std_logic;  -- write performed on edge \ of signal
---    usb_txe_n  : in   std_logic;  -- transmit enable (redy for new data if low)
---    usb_rxf_n  : in   std_logic;  -- rx fifo has data if low
-
-hdr(3 downto 0) <= lad_o when lad_oe='1' else
-				   lad;
-hdr(4)<= lframe_n;
-hdr(5)<= lreset_n;
-hdr(6)<= lclk;
-hdr(7)<= lpc_ack;
-
---hdr(7 downto 0) <= lpc_data_o(7 downto 0);
-
-hdr(8)<= lpc_val;
-hdr(9)<= '1' when lpc_wr='1' and lpc_addr(7 downto 0)=x"88" else
-		 '0';
-hdr(10)<= resetn;
 
  
 USB: usb2mem

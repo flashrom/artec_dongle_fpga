@@ -1,4 +1,4 @@
-# -*- coding: iso-8859-1 -*-
+# -*- coding: ISO-8859-1 -*-
 
 ##########################################################################
 # USPP Library (Universal Serial Port Python Library)
@@ -43,8 +43,7 @@ SerialPort_win.py - Handle low level access to serial port in windows.
 See also uspp module docstring.
 
 """
-import sys
-from struct import *
+
 from win32file import *
 from win32event import *
 import win32con
@@ -54,7 +53,8 @@ class SerialPortException(exceptions.Exception):
     """Exception raise in the SerialPort methods"""
     def __init__(self, args=None):
         self.args=args
-
+    def __str__(self):
+        return repr(self.args)
 
 class SerialPort:
     """Encapsulate methods for accesing to a serial port."""
@@ -105,7 +105,7 @@ class SerialPort:
         these values in this order.
 
         """
-        self.wait = 1024
+
         self.__devName, self.__timeout, self.__speed=dev, timeout, speed
         self.__mode=mode
         self.__params=params
@@ -129,7 +129,9 @@ class SerialPort:
                 self.__reopen = self.__reopen + 1
             if self.__reopen > 32:
                 print "Port does not exist..."
-                sys.exit()
+                raise SerialPortException('Port does not exist...')
+                break
+                #sys.exit()
         self.__configure()
 
     def __del__(self):
@@ -224,7 +226,7 @@ class SerialPort:
 
         s = ''
         while not '\n' in s:
-            s = s+SerialPort.read1(self,1)
+            s = s+SerialPort.read(self,1)
 
         return s 
 
@@ -235,63 +237,7 @@ class SerialPort:
         overlapped.hEvent=CreateEvent(None, 0,0, None)
         WriteFile(self.__handle, s, overlapped)
         # Wait for the write to complete
-        WaitForSingleObject(overlapped.hEvent, INFINITE)
-        
-    def write_2bytes(self, msb,lsb):
-        """Write one word MSB,LSB to the serial port MSB first"""
-        overlapped=OVERLAPPED()
-        overlapped.hEvent=CreateEvent(None, 0,0, None)
-        WriteFile(self.__handle, pack('BB', msb, lsb), overlapped)
-        # Wait for the write to complete
-        #WaitForSingleObject(overlapped.hEvent, INFINITE)        
-
-    def write_word(self, word):
-        """Write one word MSB,LSB to the serial port MSB first"""
-        overlapped=OVERLAPPED()
-        overlapped.hEvent=CreateEvent(None, 0,0, None)
-        WriteFile(self.__handle, pack('h', word), overlapped)
-        # Wait for the write to complete
-        #WaitForSingleObject(overlapped.hEvent, INFINITE)
-        
-    def write_buf_cmd(self, buffer):
-        """Write one word MSB,LSB to the serial port MSB first"""
-        a=0
-	if (len(buffer) < 44):  # if buffer is shorter than expected then pad with read array mode commands
-            i=0
-            while i<len(buffer):
-                print '0x%02x'%(ord(buffer[i]))
-                i+=1
-            while(a < len(buffer)):
-                overlapped=OVERLAPPED()
-                overlapped.hEvent=CreateEvent(None, 0,0, None)
-                if a < 10:
-                    WriteFile(self.__handle, pack('2c', buffer[a], buffer[a+1]), overlapped)
-                elif a < len(buffer)-2:
-                    WriteFile(self.__handle, pack('2c', buffer[a+1], buffer[a]), overlapped)    
-                elif  len(buffer)==2:
-                    WriteFile(self.__handle, pack('2c', buffer[a], buffer[a+1]), overlapped)
-                else:
-                     WriteFile(self.__handle, pack('2c', buffer[a], chr(0xFF)), overlapped)
-                a+=2       
-        else:
-            overlapped=OVERLAPPED()
-            overlapped.hEvent=CreateEvent(None, 0,0, None)
-            #first 10 bytes are in correct order + 32 data bytes are in wrong order and + 2 confirm bytes are in correct order
-            WriteFile(self.__handle, pack('44c', 
-            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
-            buffer[8], buffer[9], buffer[11], buffer[10], buffer[13], buffer[12], buffer[15], buffer[14],
-            buffer[17], buffer[16], buffer[19], buffer[18], buffer[21], buffer[20], buffer[23], buffer[22],
-            buffer[25], buffer[24], buffer[27], buffer[26], buffer[29], buffer[28], buffer[31], buffer[30],
-            buffer[33], buffer[32], buffer[35], buffer[34], buffer[37], buffer[36], buffer[39], buffer[38],
-            buffer[41], buffer[40], buffer[42], buffer[43]
-            ), overlapped)
-        
-        # Wait for the write to complete
-        #WaitForSingleObject(overlapped.hEvent, INFINITE)        
-        n = 0
-	while (n < self.wait):
-		n += 1;
-        
+        WaitForSingleObject(overlapped.hEvent, INFINITE)       
         
     def inWaiting(self):
         """Returns the number of bytes waiting to be read"""

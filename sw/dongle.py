@@ -1,5 +1,6 @@
 #! /usr/bin/python
-# -*- coding: utf-8 -*-
+# -*- coding: ISO-8859-1 -*-
+
 ##########################################################################
 # LPC Dongle programming software 
 #
@@ -25,15 +26,17 @@
 # Name:      dongle.py
 # Purpose:   Executable command line tool 
 #
-# Author:    Jüri Toomessoo <jyrit@artecdesign.ee>
+# Author:    J’ri Toomessoo <jyrit@artecdesign.ee>
 # Copyright: (c) 2006 by Artec Design
 # Licence:   LGPL
 #
 # Created:   06 Oct. 2006
 # History:   12 oct. 2006  Version 1.0 released
 #            22 Feb. 2007  Test options added to test PCB board
-#            
-#
+#            14 Nov. 2007  Moved dongle spesific code to class Dongle from USPP
+#                          USPP is allmost standard now (standard USPP would work)
+#                          Artec USPP has serial open retry
+#            14 Nov. 2007  Improved help. 
 #-------------------------------------------------------------------------
 
 import os
@@ -46,29 +49,44 @@ from Uspp.uspp import *
 
 #### global funcs ####
 def usage(s):
-    print "Artec USB Dongle programming utility ver. 1.1"
-    print "Usage: ",s," -c comport [-fvdq] filename address"
-    print "       ",s," [-fvdqr] offset length filename"
-    print ""
+    print "Artec USB Dongle programming utility ver. 2.0"
+    print "Usage:"
+    print "Write file      : ",s," [-vq] -c <name> <file> <offset>"
+    print "Readback file   : ",s," [-vq] -c <name> [-vq] -r <offset> <length> <file>"
     print "Options:"
-    print " -c        COM port"
-    print " -v        Verbose"
-    print " -f        Forced"
-    print " -d        Debug"
-    print " -q        Query"
-    print " -r        Readback "
-    print " -e        Erase device "    
-    print ""    
+    print " <file> <offset> When file and offset are given file will be written to dongle"
+    print "        file:    File name to be written to dongle"
+    print "        offset:  Specifies data writing starting point in bytes to 4M window"
+    print "                 For ThinCan boot code the offset = 4M - filesize. To write"
+    print "                 256K file the offset must be 3840K"
+    print " "
+    print " -c <name>       Indicate port name where the USB Serial Device is"
+    print "        name:    COM port name in Windows or Linux Examples: COM3,/dev/ttyS3"
+    print "                 See Device Manager in windows for USB Serial Port number"
+    print " "
+    print " -v              Enable verbose mode. Displays more progress information"
+    print " "
+    print " -q              Perform flash query to see if dongle flash is responding"
+    print " "
+    print " -r <offset> <length> <file>  Readback data. Available window size is 4MB"
+    print "        offset:  Hexademical offset byte addres inside 4MB window"
+    print "        length:  Amount in bytes to read starting from offset. Example: 1M"
+    print "                 use M for MegaBytes, K for KiloBytes, none for bytes"
+    print "        file:    Filename where data will be written"
+    print " "
+    print " -e              Erase device. Erases Full 4 MegaBytes"    
     print "Board test options: "
-    print " -t        Marching one and zero test address + data (Device must be empty)"
-    print " -b        Leave flash blanc after test "
+    print " -t              Marching one and zero test. Device must be empty"
+    print "                 To test dongle erase the flash with command -e"
+    print "                 Enables dongle memory tests to be executed by user"
+    print " "
+    print " -b              Leave flash blanc after test. Used with option -t"
     print ""       
     print "Examples:"
     print ""
-    print " ",s," -c COM3 loader.bin 0"
-    print " ",s," -c /dev/ttyS3 content.bin 256K"
-    print " ",s," -c COM3 device 1M"
-    print " ",s," -c COM3 -r 0x0000 256 flashcontent.bin"
+    print " ",s," -c COM3 loader.bin 0                       "
+    print " ",s," -c /dev/ttyS3 boot.bin 3840K"
+    print " ",s," -c COM3 -r 0x3C0000 256K flashcontent.bin"
 ######################
 
 
@@ -115,8 +133,8 @@ class Dongle:
     def __init__(self,name, baud, timeout):  #time out in millis 1000 = 1s baud like 9600, 57600
         try:
 	    self.tty = SerialPort(name,timeout, baud) 
-        except:
-            print "Unable to open port"
+        except SerialPortException , e:
+            print "Unable to open port " + name
             sys.exit();
 
     def testReturn(self,byteCount):
@@ -144,7 +162,14 @@ class Dongle:
     def write_command(self,command):
         lsb = command&0xff
         msb = (command>>8)&0xff
-        self.tty.write_2bytes(msb,lsb)
+        self.write_2bytes(msb,lsb)
+        
+    def write_2bytes(self, msb,lsb):
+        """Write one word MSB,LSB to the serial port MSB first"""
+        s = pack('BB', msb, lsb)
+        self.tty.write(s)
+        # Wait for the write to complete
+        #WaitForSingleObject(overlapped.hEvent, INFINITE)               
 
     def get_address_buf(self,address):  #set word address
         lsbyte = address&0xff
@@ -172,9 +197,9 @@ class Dongle:
         if evaluate != 0:
             print "Addressign fault. Too large address passed"
             sys.exit()
-        self.tty.write_2bytes(lsbyte,0xA0)            #set internal address to dongle
-        self.tty.write_2bytes(byte,0xA1)            #set internal address to dongle
-        self.tty.write_2bytes(msbyte,0xA2)            #send query command
+        self.write_2bytes(lsbyte,0xA0)            #set internal address to dongle
+        self.write_2bytes(byte,0xA1)            #set internal address to dongle
+        self.write_2bytes(msbyte,0xA2)            #send query command
 
     def read_data(self,wordCount,address):
         command = 0
@@ -266,8 +291,54 @@ class Dongle:
         cmd_buf+= chr(0x00)
         cmd_buf+= chr(0xD0)
         wr_buffer_cmd = adrBuf + cmd_e8 + cmd_wcnt + buffer + cmd_buf   #44 bytes total
-        self.tty.write_buf_cmd(wr_buffer_cmd)
+        self.write_buf_cmd(wr_buffer_cmd)
         # no wait needad as the FTDI chip is so slow
+
+    def write_buf_cmd(self, buffer):
+        """Write one word MSB,LSB to the serial port MSB first"""
+        a=0
+        s=""
+	if (len(buffer) < 44):  # if buffer is shorter than expected then pad with read array mode commands
+            i=0
+            while i<len(buffer):
+                print '0x%02x'%(ord(buffer[i]))
+                i+=1
+            while(a < len(buffer)):
+                if a < 10:
+                    s= pack('2c', buffer[a], buffer[a+1])
+                    self.tty.write(s)
+                elif a < len(buffer)-2:
+                    s= pack('2c', buffer[a+1], buffer[a])
+                    self.tty.write(s)
+                elif  len(buffer)==2:
+                    s=pack('2c', buffer[a], buffer[a+1])
+                    self.tty.write(s)
+                else:
+                     s=pack('2c', buffer[a], chr(0xFF))
+                     self.tty.write(s)
+                a+=2       
+        else:
+            #first 10 bytes are in correct order + 32 data bytes are in wrong order and + 2 confirm bytes are in correct order
+            s=pack('44c', 
+            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
+            buffer[8], buffer[9], buffer[11], buffer[10], buffer[13], buffer[12], buffer[15], buffer[14],
+            buffer[17], buffer[16], buffer[19], buffer[18], buffer[21], buffer[20], buffer[23], buffer[22],
+            buffer[25], buffer[24], buffer[27], buffer[26], buffer[29], buffer[28], buffer[31], buffer[30],
+            buffer[33], buffer[32], buffer[35], buffer[34], buffer[37], buffer[36], buffer[39], buffer[38],
+            buffer[41], buffer[40], buffer[42], buffer[43]
+            )
+            self.tty.write(s)
+        
+        # Wait for the write to complete
+        #WaitForSingleObject(overlapped.hEvent, INFINITE)        
+        n = 0
+        if sys.platform=='win32':
+            while (n < 1024):
+		n += 1;
+        elif sys.platform=='linux2':
+            #Linux FTDI VCP driver is way faster and needs longer grace time than windows driver
+            while (n < 1024*7):
+		n += 1;            
         
         
 ################## Main program #########################
