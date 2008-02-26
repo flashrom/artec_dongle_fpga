@@ -109,7 +109,7 @@ begin  -- process LPC
     lpc_val <='0';
 	lpc_wr <='0';
 	r_lad <= (others=>'0');
-	cycle_type <= (others=>'0');
+	cycle_type <= LPC_IO_W; --initial value 
 	r_addr <= (others=>'0');
 	r_cnt <= (others=>'0');
    elsif lclk'event and lclk = '1' then  -- rising clock edge
