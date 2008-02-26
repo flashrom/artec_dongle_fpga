@@ -34,7 +34,7 @@ entity lpc_iow is
     lreset_n   : in  std_logic;
     lclk       : in  std_logic;
     lena_mem_r : in  std_logic;  --enable lpc regular memory read cycles also (default is only LPC firmware read)
-	lena_reads : in  std_logic;  --enable read capabilities
+	 lena_reads : in  std_logic;  --enable read capabilities
 	--LPC bus from host
     lad_i      : in  std_logic_vector(3 downto 0);
     lad_o      : out std_logic_vector(3 downto 0);
@@ -232,7 +232,7 @@ begin  -- process LPC
        when others => null;          
        end case;                         
       when TARs => ------------------------------------------------------------
-          if cycle_type /= LPC_IO_W and lpc_ack='1' and r_cnt ="001" then --if mem_read or fr_read
+        if cycle_type /= LPC_IO_W and lpc_ack='1' and r_cnt ="001" then --if mem_read or fr_read
             r_data <= lpc_data_i;
             lpc_val <='0';
             data_valid <='1';
@@ -249,10 +249,10 @@ begin  -- process LPC
 			  if lpc_ack='0' then
 				lad_rising_o <= SYNC_LWAIT;              --added to avoid trouble				
 			  end if;
-            lad_rising_oe<='1';
+           lad_rising_oe<='1';
           elsif lad_i = TAR_OK then
             r_cnt<=r_cnt + 1;
-            lad_rising_oe<='1';
+            --lad_rising_oe<='1'; --BUG fix by LPC stanard TAR cycle part 2 must be tri-stated by host and device
             lad_rising_o <= TAR_OK;              --drive to F on the bus
             CS <= TARs;
           else

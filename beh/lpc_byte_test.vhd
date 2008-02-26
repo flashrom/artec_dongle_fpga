@@ -62,6 +62,8 @@ ARCHITECTURE behavior OF lpc_byte_test_vhd IS
 	PORT(
 		lreset_n : IN std_logic;
 		lclk : IN std_logic;
+      lena_mem_r : in  std_logic;  --enable lpc regular memory read cycles also (default is only LPC firmware read)
+	   lena_reads : in  std_logic;  --enable read capabilities      
 		lad_i : IN std_logic_vector(3 downto 0);
 		lframe_n : IN std_logic;
 		lpc_data_i : IN std_logic_vector(7 downto 0);
@@ -78,6 +80,10 @@ ARCHITECTURE behavior OF lpc_byte_test_vhd IS
 	--Inputs
 	SIGNAL lreset_n :  std_logic := '0';
 	SIGNAL lclk :  std_logic := '0';
+   
+   SIGNAL   lena_mem_r : std_logic:='1';  --enable lpc regular memory read cycles also (default is only LPC firmware read)
+	SIGNAL   lena_reads : std_logic:='1';  --enable read capabilities      
+      
 	SIGNAL lframe_n :  std_logic := '1';
 	SIGNAL lpc_ack :  std_logic := '0';
 	SIGNAL lad_i :  std_logic_vector(3 downto 0) := (others=>'0');
@@ -97,6 +103,8 @@ BEGIN
 	uut: lpc_iow PORT MAP(
 		lreset_n => lreset_n,
 		lclk => lclk,
+      lena_mem_r=> lena_mem_r,
+      lena_reads => lena_reads,
 		lad_i => lad_i,
 		lad_o => lad_o,
 		lad_oe => lad_oe,
@@ -165,13 +173,18 @@ BEGIN
 		lad_i <=x"F";			--TAR	1
 		wait until lclk='0'; --cycle 10
 		wait until lclk='1';				
-		if lad_o=x"F" and lad_oe='1' then  --TAR 2
+		if lad_oe='0' then  --TAR 2
 		else
 			report "LPC error found on TAR cycle no 0xF on lad_o";
 			lframe_n <='0';
 		end if;
 		wait until lclk='0'; --cycle 11
-		wait until lclk='1';				
+		wait until lclk='1';
+      wait until lad_o=x"6";
+      while(lad_o=x"6") loop
+         wait until lclk='0'; --cycle 11
+         wait until lclk='1';     
+      end loop;
 		if (lad_o=x"0") and lad_oe='1' then --SYNC
 		else
 			report "LPC error found on SYNC cycle no 0x0 on lad_o";
