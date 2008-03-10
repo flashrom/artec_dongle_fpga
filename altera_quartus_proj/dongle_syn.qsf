@@ -76,7 +76,7 @@ set_location_assignment PIN_128 -to fl_data[13]
 set_location_assignment PIN_123 -to fl_data[14]
 set_location_assignment PIN_121 -to fl_data[15]
 set_location_assignment PIN_119 -to fl_oe_n
-set_location_assignment PIN_131 -to fl_sts
+set_location_assignment PIN_120 -to fl_sts
 set_location_assignment PIN_114 -to fl_we_n
 set_location_assignment PIN_85 -to hdr[0]
 set_location_assignment PIN_84 -to hdr[1]
@@ -88,7 +88,6 @@ set_location_assignment PIN_77 -to hdr[6]
 set_location_assignment PIN_76 -to hdr[7]
 set_location_assignment PIN_75 -to hdr[8]
 set_location_assignment PIN_74 -to hdr[9]
-set_location_assignment PIN_73 -to hdr[10]
 set_location_assignment PIN_97 -to lad[0]
 set_location_assignment PIN_99 -to lad[1]
 set_location_assignment PIN_98 -to lad[2]
@@ -130,20 +129,11 @@ set_global_assignment -name RESERVE_ASDO_AFTER_CONFIGURATION "AS INPUT TRI-STATE
 set_global_assignment -name STRATIX_DEVICE_IO_STANDARD LVCMOS
 set_global_assignment -name ALLOW_LVTTL_LVCMOS_INPUT_LEVELS_TO_OVERDRIVE_INPUT_BUFFER ON
 set_global_assignment -name FMAX_REQUIREMENT "33 MHz" -section_id for33
-set_instance_assignment -name CLOCK_SETTINGS for33 -to lclk
 set_global_assignment -name FMAX_REQUIREMENT "25 MHz" -section_id for25sys
-set_instance_assignment -name CLOCK_SETTINGS for25sys -to sys_clk
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[0]
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[1]
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[2]
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[3]
-set_global_assignment -name VHDL_FILE ../src/usb/usb2mem.vhd
-set_global_assignment -name VHDL_FILE ../src/lpc_proto/lpc_byte.vhd
-set_global_assignment -name VHDL_FILE ../src/flash/flsh_if.vhd
-set_global_assignment -name VHDL_FILE ../src/led_sys/led_coder.vhd
-set_global_assignment -name VHDL_FILE ../src/led_sys/byte_scan_mux.vhd
-set_global_assignment -name VHDL_FILE ../src/led_sys/led_sys.vhd
-set_global_assignment -name VHDL_FILE ../src/design_top/design_top_thincandbg.vhd
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to lad
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to fl_data
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to hdr
@@ -160,3 +150,18 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 12MA -to seg_out
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to usb_rd_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to usb_wr
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to hdr[3]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to hdr[5]
+set_global_assignment -name VHDL_FILE ../src/postcode_ser/fifo.vhd
+set_global_assignment -name VHDL_FILE ../src/postcode_ser/pc_serializer.vhd
+set_global_assignment -name VHDL_FILE ../src/usb/usb2mem.vhd
+set_global_assignment -name VHDL_FILE ../src/lpc_proto/lpc_byte.vhd
+set_global_assignment -name VHDL_FILE ../src/flash/flsh_if.vhd
+set_global_assignment -name VHDL_FILE ../src/led_sys/led_coder.vhd
+set_global_assignment -name VHDL_FILE ../src/led_sys/byte_scan_mux.vhd
+set_global_assignment -name VHDL_FILE ../src/led_sys/led_sys.vhd
+set_global_assignment -name VHDL_FILE ../src/design_top/design_top_thincandbg.vhd
+set_global_assignment -name FMAX_REQUIREMENT "12.5 MHz" -section_id "design_top|pc_serializer:DBG|half_clk"
+set_instance_assignment -name CLOCK_SETTINGS for33 -to for33
+set_instance_assignment -name CLOCK_SETTINGS for25sys -to for25sys
+set_instance_assignment -name CLOCK_SETTINGS "design_top|pc_serializer:DBG|half_clk" -to "pc_serializer:DBG|half_clk"
+set_location_assignment PIN_131 -to fl_sts_en

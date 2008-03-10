@@ -129,7 +129,7 @@ fl_addr[21]                  : 69        : output : LVCMOS            :         
 fl_addr[22]                  : 70        : output : LVCMOS            :         : 4         : Y              
 fl_addr[0]                   : 71        : output : LVCMOS            :         : 4         : Y              
 seg_out[7]                   : 72        : output : LVCMOS            :         : 4         : N              
-hdr[10]                      : 73        : bidir  : LVCMOS            :         : 3         : Y              
+fl_rp_n                      : 73        : output : LVCMOS            :         : 3         : N              
 hdr[9]                       : 74        : bidir  : LVCMOS            :         : 3         : Y              
 hdr[8]                       : 75        : bidir  : LVCMOS            :         : 3         : Y              
 hdr[7]                       : 76        : bidir  : LVCMOS            :         : 3         : Y              
@@ -176,7 +176,7 @@ GND                          : 116       : gnd    :                   :         
 VCCINT                       : 117       : power  :                   : 1.5V    :           :                
 GND                          : 118       : gnd    :                   :         :           :                
 fl_oe_n                      : 119       : output : LVCMOS            :         : 2         : Y              
-fl_rp_n                      : 120       : output : LVCMOS            :         : 2         : N              
+fl_sts                       : 120       : input  : LVCMOS            :         : 2         : Y              
 fl_data[15]                  : 121       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[7]                   : 122       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[14]                  : 123       : bidir  : LVCMOS            :         : 2         : Y              
@@ -187,7 +187,7 @@ GND                          : 127       : gnd    :                   :         
 fl_data[13]                  : 128       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[12]                  : 129       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[4]                   : 130       : bidir  : LVCMOS            :         : 2         : Y              
-fl_sts                       : 131       : input  : LVCMOS            :         : 2         : Y              
+fl_sts_en                    : 131       : output : LVCMOS            :         : 2         : Y              
 fl_data[11]                  : 132       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[3]                   : 133       : bidir  : LVCMOS            :         : 2         : Y              
 fl_data[10]                  : 134       : bidir  : LVCMOS            :         : 2         : Y              
