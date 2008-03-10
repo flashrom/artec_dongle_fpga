@@ -4,7 +4,7 @@
 ##########################################################################
 # LPC Dongle programming software 
 #
-# Copyright (C) 2006 Artec Design
+# Copyright (C) 2008 Artec Design
 # 
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -26,30 +26,419 @@
 # Name:      dongle.py
 # Purpose:   Executable command line tool 
 #
-# Author:    J’ri Toomessoo <jyrit@artecdesign.ee>
-# Copyright: (c) 2006 by Artec Design
+# Author:    Jüri Toomessoo <jyrit@artecdesign.ee>
+# Copyright: (c) 2008 by Artec Design
 # Licence:   LGPL
 #
 # Created:   06 Oct. 2006
 # History:   12 oct. 2006  Version 1.0 released
 #            22 Feb. 2007  Test options added to test PCB board
+#            10 Nov. 2007  Added open retry code to dongle
 #            14 Nov. 2007  Moved dongle spesific code to class Dongle from USPP
 #                          USPP is allmost standard now (standard USPP would work)
 #                          Artec USPP has serial open retry
 #            14 Nov. 2007  Improved help. 
+#            10 Mar. 2008  Forced code to hw flow control settings made linux 1 byte read to 2 bytes
+#                          as dongle never reads 1 byte at the time
 #-------------------------------------------------------------------------
 
 import os
 import sys
 import string
 import time
+import struct
 from sets import *
 from struct import *
-from Uspp.uspp import *
+
+#### inline of artec FTDI spesific Uspp code ###################################################
+
+##########################################################################
+# USPP Library (Universal Serial Port Python Library)
+#
+# Copyright (C) 2006 Isaac Barona <ibarona@gmail.com>
+# 
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+# 
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+##########################################################################
+
+#-------------------------------------------------------------------------
+# Project:   USPP Library (Universal Serial Port Python Library)
+# Name:      uspp.py
+# Purpose:   Main module. Imports the correct module for the platform
+#            in which it is running.
+#
+# Author:    Isaac Barona Martinez <ibarona@gmail.com>
+# Contributors:
+#            Damien Géranton <dgeranton@voila.fr>
+#            Douglas Jones <dfj23@drexel.edu>
+#            J.Grauheding <juergen.grauheding@a-city.de>
+#            J.Toomessoo jyrit@artecdesign.ee
+#
+# Copyright: (c) 2006 by Isaac Barona Martinez
+# Licence:   LGPL
+#
+# Created:   26 June 2001
+# History:
+#            05/08/2001: Release version 0.1.
+#            24/02/2006: Final version 1.0.
+#            10/11/2007: Added open retry code to dongle
+#                        by Jyri Toomessoo jyrit@artecdesign.ee
+#            14/11/2007: Moved dongle spesific code to class Dongle from USPP
+#                        USPP is allmost standard now (standard USPP would work)
+#                        Artec USPP has serial open retry
+#                        by Jyri Toomessoo jyrit@artecdesign.ee
+#            10/03/2008: Forced code to hw flow control settings made linux 1 byte read to 2 bytes
+#                        as dongle never reads 1 byte at the time
+#                        by Jyri Toomessoo jyrit@artecdesign.ee
+#            10/03/2008: Copose single infile bundle for FTDI USB serial 1.2
+#                        this is nonuniversal modification of the code to suite the need of Artec Design Dongle
+#                        by Jyri Toomessoo jyrit@artecdesign.ee
+#-------------------------------------------------------------------------
+
+
+drv_ok = 0
+if sys.platform=='win32':
+    print "Windows platform detected:"
+    if drv_ok == 0:
+        try:
+            from win32file import *
+            from win32event import *
+            import win32con
+            import exceptions
+            
+            print "Using VCP FTDI driver"
+        except ImportError,SerialPortException:        
+            print "Python for winiows extensions for COM not found" 
+            print "(see https://sourceforge.net/projects/pywin32/)"
+            print "Could not find any usable support for FTDI chip in python"
+            print "Try installing python support from one of the links."
+            sys.exit()
+elif sys.platform=='linux2':
+    from termios import *
+    import fcntl
+    import exceptions
+    import array
+    print "Linux platform detected:"
+else:
+    sys.exit('Sorry, no implementation for this platform yet')
+
+
+
+class SerialPortException(exceptions.Exception):
+    """Exception raise in the SerialPort methods"""
+    def __init__(self, args=None):
+        self.args=args
+    def __str__(self):
+        return repr(self.args)
+
+    
+if sys.platform=='win32':    
+  class SerialPortWin:
+    BaudRatesDic={110: CBR_110,
+                  300: CBR_300,
+                  600: CBR_600,
+                  1200: CBR_1200,
+                  2400: CBR_2400,
+                  4800: CBR_4800, 
+                  9600: CBR_9600,
+                  19200: CBR_19200,
+                  38400: CBR_38400,
+                  57600: CBR_57600,
+                  115200: CBR_115200,
+                  128000: CBR_128000,
+                  256000: CBR_256000
+                  }
+
+    def __init__(self, dev, timeout=None, speed=115200, mode='232', params=None):
+        self.__devName, self.__timeout, self.__speed=dev, timeout, speed
+        self.__mode=mode
+        self.__params=params
+        self.__speed = 0
+        self.__reopen = 0
+        while 1:
+            try:
+                self.__handle=CreateFile (dev,
+                win32con.GENERIC_READ|win32con.GENERIC_WRITE,
+                0, # exclusive access
+                None, # no security
+                win32con.OPEN_EXISTING,
+                win32con.FILE_ATTRIBUTE_NORMAL,
+                None)
+                break
+                        
+            except:
+                n=0
+                while (n < 2000000):
+                    n += 1;                
+                self.__reopen = self.__reopen + 1
+            if self.__reopen > 32:
+                print "Port does not exist..."
+                raise SerialPortException('Port does not exist...')
+                break
+                #sys.exit()
+        self.__configure()
+
+    def __del__(self):
+        if self.__speed:
+            try:
+                CloseHandle(self.__handle)
+            except:
+                raise SerialPortException('Unable to close port')
+
+
+            
+
+    def __configure(self):
+        if not self.__speed:
+            self.__speed=115200
+        # Tell the port we want a notification on each char
+        SetCommMask(self.__handle, EV_RXCHAR)
+        # Setup a 4k buffer
+        SetupComm(self.__handle, 4096, 4096)
+        # Remove anything that was there
+        PurgeComm(self.__handle, PURGE_TXABORT|PURGE_RXABORT|PURGE_TXCLEAR|
+                  PURGE_RXCLEAR)
+        if self.__timeout==None:
+            timeouts= 0, 0, 0, 0, 0
+        elif self.__timeout==0:
+            timeouts = win32con.MAXDWORD, 0, 0, 0, 1000
+        else:
+            timeouts= self.__timeout, 0, self.__timeout, 0 , 1000
+        SetCommTimeouts(self.__handle, timeouts)
+
+        # Setup the connection info
+        dcb=GetCommState(self.__handle)
+        dcb.BaudRate=SerialPortWin.BaudRatesDic[self.__speed]
+        if not self.__params:
+            dcb.ByteSize=8
+            dcb.Parity=NOPARITY
+            dcb.StopBits=ONESTOPBIT
+            dcb.fRtsControl=RTS_CONTROL_ENABLE
+            dcb.fOutxCtsFlow=1
+        else:
+            dcb.ByteSize, dcb.Parity, dcb.StopBits=self.__params
+        SetCommState(self.__handle, dcb)
+        
+
+    def fileno(self):
+        return self.__handle
+
+
+    def read(self, num=1):
+        (Br, buff) = ReadFile(self.__handle, num)
+        if len(buff)<>num and self.__timeout!=0: # Time-out  
+            print 'Expected %i bytes but got %i before timeout'%(num,len(buff))
+            raise SerialPortException('Timeout')
+        else:
+            return buff
+
+
+    def readline(self):
+        s = ''
+        while not '\n' in s:
+            s = s+SerialPortWin.read(self,1)
+
+        return s 
+
+
+    def write(self, s):
+        """Write the string s to the serial port"""
+        errCode = 0
+        overlapped=OVERLAPPED()
+        overlapped.hEvent=CreateEvent(None, 0,0, None)
+        (errCode, bytesWritten) = WriteFile(self.__handle, s,overlapped)
+        # Wait for the write to complete
+        WaitForSingleObject(overlapped.hEvent, INFINITE)
+        return bytesWritten
+        
+    def inWaiting(self):
+        """Returns the number of bytes waiting to be read"""
+        flags, comstat = ClearCommError(self.__handle)
+        return comstat.cbInQue
+
+    def flush(self):
+        """Discards all bytes from the output or input buffer"""
+        PurgeComm(self.__handle, PURGE_TXABORT|PURGE_RXABORT|PURGE_TXCLEAR|
+                  PURGE_RXCLEAR)
+
+
+                  
+if sys.platform=='linux2':                  
+  class SerialPortLin:
+    """Encapsulate methods for accesing to a serial port."""
+
+    BaudRatesDic={
+        110: B110,
+        300: B300,
+        600: B600,
+        1200: B1200,
+        2400: B2400,
+        4800: B4800, 
+        9600: B9600,
+        19200: B19200,
+        38400: B38400,
+        57600: B57600,
+        115200: B115200,
+        230400: B230400
+        }
+    buf = array.array('h', '\000'*4)
+
+    def __init__(self, dev, timeout=None, speed=115200, mode='232', params=None):
+        self.__devName, self.__timeout, self.__speed=dev, timeout, speed
+        self.__mode=mode
+        self.__params=params
+        self.__speed = 0
+        self.__reopen = 0
+        while 1:
+            try:
+                self.__handle=os.open(dev, os.O_RDWR)
+                break
+                        
+            except:
+                n=0
+                while (n < 2000000):
+                    n += 1;                
+                self.__reopen = self.__reopen + 1
+            if self.__reopen > 32:
+                print "Port does not exist..."
+                raise SerialPortException('Port does not exist...')
+                break
+
+        self.__configure()
+
+    def __del__(self):
+	if self.__speed:
+            #tcsetattr(self.__handle, TCSANOW, self.__oldmode)
+            pass
+            try:
+                pass
+                os.close(self.__handle)
+            except IOError:
+                raise SerialPortException('Unable to close port')
+
+
+    def __configure(self):
+        if not self.__speed:
+            self.__speed=115200
+        
+        # Save the initial port configuration
+        self.__oldmode=tcgetattr(self.__handle)
+        if not self.__params:
+            # print "Create linux params for serialport..."
+            # self.__params is a list of attributes of the file descriptor
+            # self.__handle as follows:
+            # [c_iflag, c_oflag, c_cflag, c_lflag, c_ispeed, c_ospeed, cc]
+            # where cc is a list of the tty special characters.
+            self.__params=[]
+            # c_iflag
+            self.__params.append(IGNPAR)           
+            # c_oflag
+            self.__params.append(0)                
+            # c_cflag
+            self.__params.append(CS8|CREAD|CRTSCTS) 
+            # c_lflag
+            self.__params.append(0)                
+            # c_ispeed
+            self.__params.append(SerialPortLin.BaudRatesDic[self.__speed]) 
+            # c_ospeed
+            self.__params.append(SerialPortLin.BaudRatesDic[self.__speed]) 
+	    cc=[0]*NCCS
+        if self.__timeout==None:
+            # A reading is only complete when VMIN characters have
+            # been received (blocking reading)
+            cc[VMIN]=1
+            cc[VTIME]=0
+        elif self.__timeout==0:
+            cc[VMIN]=0
+            cc[VTIME]=0
+        else:
+            cc[VMIN]=0
+            cc[VTIME]=self.__timeout #/100
+        self.__params.append(cc)               # c_cc
+        
+        tcsetattr(self.__handle, TCSANOW, self.__params)
+    
+
+    def fileno(self):
+        return self.__handle
+
+
+    def __read1(self):
+        tryCnt = 0
+        byte = ""
+        while(len(byte)==0 and tryCnt<10):
+            tryCnt+=1
+            byte = os.read(self.__handle, 2)
+        if len(byte)==0 and self.__timeout!=0: # Time-out
+            print 'Time out cnt was %i'%(tryCnt) 
+            print 'Expected 1 byte but got %i before timeout'%(len(byte))
+            sys.stdout.flush()
+            raise SerialPortException('Timeout')
+        else:
+            return byte
+            
+
+    def read(self, num=1):
+        s=''
+        for i in range(num/2):
+            s=s+SerialPortLin.__read1(self)
+        return s
+
+
+    def readline(self):
+
+        s = ''
+        while not '\n' in s:
+            s = s+SerialPortLin.__read1(self)
+
+        return s 
+
+        
+    def write(self, s):
+        """Write the string s to the serial port"""
+        return os.write(self.__handle, s)
+        
+    def inWaiting(self):
+        """Returns the number of bytes waiting to be read"""
+    	data = struct.pack("L", 0)
+        data=fcntl.ioctl(self.__handle, TIOCINQ, data)
+    	return struct.unpack("L", data)[0]
+
+    def outWaiting(self):
+        """Returns the number of bytes waiting to be write
+        mod. by J.Grauheding
+        result needs some finetunning
+        """
+        rbuf=fcntl.ioctl(self.__handle, TIOCOUTQ, self.buf)
+        return rbuf
+
+    
+    def flush(self):
+        """Discards all bytes from the output or input buffer"""
+        tcflush(self.__handle, TCIOFLUSH)                  
+
+
+
+#### end inline of artec FTDI spesific Uspp code ###############################################
+
+
+#### Dongle code starts here  ##################################################################
+
 
 #### global funcs ####
 def usage(s):
-    print "Artec USB Dongle programming utility ver. 2.0"
+    print "Artec USB Dongle programming utility ver. 2.5"
     print "Usage:"
     print "Write file      : ",s," [-vq] -c <name> <file> <offset>"
     print "Readback file   : ",s," [-vq] -c <name> [-vq] -r <offset> <length> <file>"
@@ -69,7 +458,9 @@ def usage(s):
     print " -q              Perform flash query to see if dongle flash is responding"
     print " "
     print " -r <offset> <length> <file>  Readback data. Available window size is 4MB"
-    print "        offset:  Hexademical offset byte addres inside 4MB window"
+    print "        offset:  Offset byte addres inside 4MB window. Example: 1M"
+    print "                 use M for MegaBytes, K for KiloBytes, none for bytes"
+    print "                 use 0x prefix to indicate hexademical number format"
     print "        length:  Amount in bytes to read starting from offset. Example: 1M"
     print "                 use M for MegaBytes, K for KiloBytes, none for bytes"
     print "        file:    Filename where data will be written"
@@ -81,6 +472,8 @@ def usage(s):
     print "                 Enables dongle memory tests to be executed by user"
     print " "
     print " -b              Leave flash blanc after test. Used with option -t"
+    print " -l              Fast poll loop test. Does poll loop 1024 times"
+    print "                 used to stress test connection"
     print ""       
     print "Examples:"
     print ""
@@ -99,12 +492,14 @@ class DongleMode:
         self.r = 0
         self.t = 0
         self.e = 0
-        self.b = 0        
+        self.b = 0
+        self.l = 0
         self.filename=""
         self.portname=""
         self.address=-1
         self.offset=-1
         self.length=-1
+        self.version=4
      
     def convParamStr(self,param):
         mult = 1
@@ -131,8 +526,13 @@ class DongleMode:
     
 class Dongle:
     def __init__(self,name, baud, timeout):  #time out in millis 1000 = 1s baud like 9600, 57600
+        self.mode = 0
         try:
-	    self.tty = SerialPort(name,timeout, baud) 
+            if sys.platform=='win32':
+                self.tty = SerialPortWin(name,timeout, baud)
+            else: 
+                self.tty = SerialPortLin(name,timeout, baud)
+            
         except SerialPortException , e:
             print "Unable to open port " + name
             sys.exit();
@@ -145,18 +545,26 @@ class Dongle:
                 break
         if i==10000*byteCount:
             return 0
-        return don.tty.inWaiting()  ## ret two bytes            
+        j=don.tty.inWaiting()
+        #print "Tested in waiting %i needed %i"%(j,byteCount)
+        return j  ## ret two bytes            
             
     def getReturn(self,byteCount):
         i=0
-        while don.tty.inWaiting()<byteCount:
-            i=i+1
-            if i==10000*byteCount:
-                break
-        if i==10000*byteCount:
-            print "Dongle not communicating"
-            sys.exit()
-        return don.tty.read(byteCount)  ## ret two bytes
+        #while don.tty.inWaiting()<byteCount:
+        #    i=i+1
+        #    time.sleep(0.1)
+        #    if i==100*byteCount:
+        #        print "Dongle not communicating"
+        #        #print "Read in waiting %i needed %i was %i"%(i,byteCount,don.tty.inWaiting())
+        #        sys.exit()
+        #        break
+            
+        #i=don.tty.inWaiting()
+        #print "Read in waiting %i needed %i was %i"%(i,byteCount,don.tty.inWaiting())
+        buf = don.tty.read(byteCount)
+        #print "Got bytes =%i "%(len(buf))
+        return buf  ## ret two bytes
     
 
     def write_command(self,command):
@@ -167,7 +575,9 @@ class Dongle:
     def write_2bytes(self, msb,lsb):
         """Write one word MSB,LSB to the serial port MSB first"""
         s = pack('BB', msb, lsb)
-        self.tty.write(s)
+        ret = self.tty.write(s)
+        if(ret<len(s)):
+            print 'write_2byte: Wrote less then needed %i bytes from %i'%(ret,length(s))        
         # Wait for the write to complete
         #WaitForSingleObject(overlapped.hEvent, INFINITE)               
 
@@ -213,6 +623,18 @@ class Dongle:
         else:
             print "Word count can't be under 1"
             sys.exit() 
+              
+            
+    def issue_blk_read(self):
+        command = 0
+        wordCount = 0
+        byteCount = wordCount<<1  #calc byte count
+        command = (command|wordCount)<<8;
+        command = command|0xCD
+        self.write_command(command)  # send get data command
+
+
+            
             
     def read_status(self):
         don.write_command(0x0070) # 0x0098 //clear status
@@ -268,8 +690,8 @@ class Dongle:
         self.write_command(command)  #issue block erase
         command = 0x00D0
         self.write_command(command)  #issue block erase confirm
-        self.wait_on_busy()
-        self.parse_status()
+        #self.wait_on_busy()
+        #self.parse_status()
     
     def buffer_write(self,wordCount,startAddress,buffer):
         # to speed up buffer writing compose all commands into one buffer
@@ -292,7 +714,16 @@ class Dongle:
         cmd_buf+= chr(0xD0)
         wr_buffer_cmd = adrBuf + cmd_e8 + cmd_wcnt + buffer + cmd_buf   #44 bytes total
         self.write_buf_cmd(wr_buffer_cmd)
-        # no wait needad as the FTDI chip is so slow
+        
+        if self.mode.version <5:
+            n = 0
+            if sys.platform=='win32':
+                while (n < 1024):
+                    n += 1;
+            elif sys.platform=='linux2':
+                #Linux FTDI VCP driver is way faster and needs longer grace time than windows driver
+                while (n < 1024*8):
+                    n += 1;                    
 
     def write_buf_cmd(self, buffer):
         """Write one word MSB,LSB to the serial port MSB first"""
@@ -327,18 +758,9 @@ class Dongle:
             buffer[33], buffer[32], buffer[35], buffer[34], buffer[37], buffer[36], buffer[39], buffer[38],
             buffer[41], buffer[40], buffer[42], buffer[43]
             )
-            self.tty.write(s)
-        
-        # Wait for the write to complete
-        #WaitForSingleObject(overlapped.hEvent, INFINITE)        
-        n = 0
-        if sys.platform=='win32':
-            while (n < 1024):
-		n += 1;
-        elif sys.platform=='linux2':
-            #Linux FTDI VCP driver is way faster and needs longer grace time than windows driver
-            while (n < 1024*7):
-		n += 1;            
+            
+            ret = self.tty.write(s)
+
         
         
 ################## Main program #########################
@@ -381,7 +803,9 @@ for arg in sys.argv:
             if op=="e":
                 mode.e = 1   
             if op=="b":
-                mode.b = 1                   
+                mode.b = 1
+            if op=="l":
+                mode.l = 1                      
     else:
         i = sys.argv.index(arg)
         if i ==  last_ops + 1:
@@ -423,7 +847,16 @@ else:
     # ok done
     reopened = 0
 
-    don  = Dongle(mode.portname,115200,100)
+    
+    if sys.platform=='win32':
+        don  = Dongle(mode.portname,256000,6000)
+    elif sys.platform=='linux2':
+        don  = Dongle(mode.portname,230400,6000)
+        #don.tty.cts()
+    else:
+        sys.exit('Sorry, no implementation for this platform yet')
+    
+    
     don.tty.wait = wait   
     while 1:
         don.write_command(0x0050) # 0x0098
@@ -436,16 +869,32 @@ else:
              sys.exit()
         reopened = reopened + 1
         # reopen and do new cycle
-        don = Dongle(mode.portname,115200,100)
+        if sys.platform=='win32':
+            don  = Dongle(mode.portname,256000,6000)
+        elif sys.platform=='linux2':
+            don  = Dongle(mode.portname,230400,6000)
+            #self.tty.cts()
+        else:
+            sys.exit('Sorry, no implementation for this platform yet')
         don.tty.wait = wait   
 
     buf=don.getReturn(2)  # two bytes expected to this command
-          
     if ord(buf[1])==0x32 and  ord(buf[0])==0x10:
         print "Dongle OK"
     else:
         print 'Dongle returned on open: %02x %02x '%(ord(buf[1]), ord(buf[0]))
- 
+    don.write_command(0x01C5)            #try getting dongle HW ver (works since 05 before that returns 0x3210)
+    buf=don.getReturn(2)  # two bytes expected to this command
+    if ord(buf[1])==0x86 and  ord(buf[0])>0x04:
+        mode.version = ord(buf[0])
+        don.mode = mode
+        print 'Dongle HW version code is  %02x %02x'%(ord(buf[1]), ord(buf[0]))
+    else:
+        don.mode = mode
+        print 'Dongle HW version code is smaller than 05 some features have been improved on'
+        print 'HW code and Quartus FPGA binary file are available at:' 
+        print 'http://www.opencores.org/projects.cgi/web/usb_dongle_fpga/overview'
+        print 'Programming is possible with Altera Quartus WE and BYTEBLASTER II cable'
     
 if mode.q == 1:   # perform a query from dongle
     
@@ -455,11 +904,11 @@ if mode.q == 1:   # perform a query from dongle
     buf=don.read_data(3,0x000010)  # word count and word address
     if ord(buf[0])==0x51 and  ord(buf[2])==0x52 and  ord(buf[4])==0x59:
         buf=don.read_data(2,0x000000)  # word count and word address
-        print 'Query  OK, Factory: 0x%02x device: 0x%02x '%(ord(buf[0]),ord(buf[2]))
+        print 'Query  OK, Flash Factory Code is: 0x%02x device: 0x%02x '%(ord(buf[0]),ord(buf[2]))
         buf=don.read_data(2,0x000002)
 	print 'lock bit is 0x%02x 0x%02x'%(ord(buf[0]),ord(buf[1]))
     else:
-        print "Got bad query data:"
+        print "Got bad Flash query data:"
         print 'Query address 0x10 = 0x%02x%02x '%(ord(buf[1]),ord(buf[0]))
         print 'Query address 0x12 = 0x%02x%02x '%(ord(buf[3]),ord(buf[2]))
         print 'Query address 0x14 = 0x%02x%02x '%(ord(buf[5]),ord(buf[4]))    
@@ -489,8 +938,9 @@ if mode.filename!="" and mode.address!=-1:
     #clear blockLock bits
     don.write_command(0x0060) # 0x0098
     don.write_command(0x00D0) # 0x0098
-    don.wait_on_busy()
-    don.parse_status()
+    if mode.version < 5:
+        don.wait_on_busy()
+        don.parse_status()
     wordSize = (size+ (size&1))>> 1    # round byte count up and make word address
     endBlock = don.get_block_no(mode.address+wordSize - 1)  
     startBlock = don.get_block_no(mode.address)
@@ -503,8 +953,9 @@ if mode.filename!="" and mode.address!=-1:
             sys.stdout.write(".")
             sys.stdout.flush()
         don.erase_block(i)
-        don.wait_on_busy()
-        don.parse_status()   #do this after programming all but uneaven ending
+        if mode.version < 5:
+            don.wait_on_busy()
+            don.parse_status()   #do this after programming all but uneaven ending
         i=i+1
     if mode.v == 0:
         print " "
@@ -541,40 +992,80 @@ if mode.filename!="" and mode.address!=-1:
             break
     if mode.v == 0:
         print " "
+    if mode.version >= 5:
+        print "Waiting for buffers to empty"
+        don.wait_on_busy()
+        don.parse_status()   #do this after programming all but uneaven ending        
     print "Write DONE!"
     don.parse_status()   #do this after programming all but uneaven ending
     f.close()
     
 if mode.r == 1:   # perform a readback
     if mode.offset!=-1 and mode.length!=-1 and mode.filename!="":
-        mode.offset=mode.offset>>1    #make word offset
-        mode.length= mode.length>>1   #make word length
-        print 'Reading %iK'%(mode.length/512)
-        try:
-            f=open(mode.filename,"wb")
+        if mode.version >= 5:
+            ##################### from hw ver 5 readback code ##################################################
+            blockCount = (mode.length>>17)+1 #read this many 64K word blocks
+            mode.offset=mode.offset>>1    #make word offset
+            lastLength = mode.length&0x0001FFFF  
+            mode.length= mode.length>>1   #make word length
+            if mode.length < 512:                
+                print 'Reading %i bytes in single block '%(lastLength)
+            else:
+                print 'Reading %iK in %i blocks '%(mode.length/512,blockCount)
             don.write_command(0x00FF) #  put flash to data read mode
-            address = mode.offset    # set word address
-            while 1:
-                if address/(1024*32) != (address-128)/(1024*32):  # get K bytes from words if 512
+            try:
+                f=open(mode.filename,"wb")  #if this fails no point in reading as there is nowhere to write
+                address = mode.offset    # set word address
+                don.set_address(address)
+                i=0
+                while (i<blockCount):
+                    don.issue_blk_read()  # request 64K words from current address
+                    buf=don.getReturn(65536*2) #Read all words
+                    if (i==blockCount-1):  #last block
+                        f.write(buf[:lastLength])
+                    else:
+                        f.write(buf) ## must tuncate the buffer
                     if mode.v == 1:
-                        print 'Progress: %iK of %iK'%((address-mode.offset)/512,mode.length/512)
+                        print 'Got block %i'%(i+1)
                     else:
                         sys.stdout.write(".")
                         sys.stdout.flush()
-                buf=don.read_data(128,address)  # word count and byte address read 64 words to speed up
-                f.write(buf)
-                #print "from address:",address<<1," ", len(buf)
-                if address+128 >= (mode.offset + mode.length):  # 2+64 estimates the end to end in right place
-                    break
-                address = address + 128    #this is word address
-            f.close()
-            if mode.v == 0:
-                print " "            
-            print "Readback done!"
-        except IOError:
-            print "IO Error on file open"
-            sys.exit()        
-        
+                    i+=1
+                f.close()    
+            except IOError:
+                print "IO Error on file open"
+                sys.exit()                    
+            ##################### end from hw ver 5 readback code  ############################################ 
+        else:
+            ##################### before hw ver 5 readback code ###############################################
+            mode.offset=mode.offset>>1    #make word offset
+            mode.length= mode.length>>1   #make word length
+            print 'Reading %iK'%(mode.length/512)
+            try:
+                f=open(mode.filename,"wb")
+                don.write_command(0x00FF) #  put flash to data read mode
+                address = mode.offset    # set word address
+                while 1:
+                    if address/(1024*32) != (address-128)/(1024*32):  # get K bytes from words if 512
+                        if mode.v == 1:
+                            print 'Progress: %iK of %iK'%((address-mode.offset)/512,mode.length/512)
+                        else:
+                            sys.stdout.write(".")
+                            sys.stdout.flush()
+                    buf=don.read_data(128,address)  # word count and byte address read 64 words to speed up
+                    f.write(buf)
+                    #print "from address:",address<<1," ", len(buf)
+                    if address+128 >= (mode.offset + mode.length):  # 2+64 estimates the end to end in right place
+                        break
+                    address = address + 128    #this is word address
+                f.close()
+                if mode.v == 0:
+                    print " "            
+                print "Readback done!"
+            except IOError:
+                print "IO Error on file open"
+                sys.exit()        
+       ##################### end before hw ver 5 readback code  ################################################ 
     else:
        print "Some of readback parameters missing..."
        print mode.offset,mode.length, mode.filename
@@ -670,8 +1161,9 @@ if mode.t == 1:   # perform dongle test
                         sys.stdout.write(".")
                         sys.stdout.flush()
                     don.erase_block(i)
-                    don.wait_on_busy()
-                    don.parse_status()   #do this after programming all but uneaven ending
+                    if mode.version < 5:
+                        don.wait_on_busy()
+                        don.parse_status()   #do this after programming all but uneaven ending
                     i=i+1
                 if mode.v == 0:
                     print " "
@@ -686,8 +1178,9 @@ if mode.e == 1:   # perform dongle test
             print "Erasing all"
             don.write_command(0x0060) # 0x0098
             don.write_command(0x00D0) # 0x0098
-            don.wait_on_busy()
-            don.parse_status()
+            if mode.version < 5:
+                don.wait_on_busy()
+                don.parse_status()
             endBlock = 31
             startBlock = 0
             i=startBlock
@@ -698,11 +1191,31 @@ if mode.e == 1:   # perform dongle test
                      sys.stdout.write(".")
                      sys.stdout.flush()
                 don.erase_block(i)
-                don.wait_on_busy()
-                don.parse_status()   #do this after programming all but uneaven ending
+                if mode.version < 5:
+                    don.wait_on_busy()
+                    don.parse_status()   #do this after programming all but uneaven ending
                 i=i+1  
             if mode.v == 0: # add CRTL return to dots
                 print "" 
+            if mode.version >= 5:
+                print "Waiting for buffers to empty"
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
             print "Erase done."
-       
+
+if mode.l == 1:   # perform dongle test            
+            #Erase Dongle
+            print "Status Loop test"
+            i=1024
+            startTime = time.clock()
+            while i > 0:
+                sys.stdout.write(".")
+                sys.stdout.flush()
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
+                i=i-1
+            if sys.platform=='win32':
+                endTime = (time.clock()-startTime)/1024.0
+                print "\nSystem round delay is %4f ms"%(endTime*1000.0)
+            sys.stdout.flush()
 ##########################################################
