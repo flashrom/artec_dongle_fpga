@@ -63,7 +63,7 @@ entity design_top is
 	--system signals
 	sys_clk    : in    std_logic;         --25 MHz clk
 	resetn     : in    std_logic;     
-	hdr		   : inout    std_logic_vector(10 downto 0);
+	hdr		   : inout    std_logic_vector(9 downto 0);
 	--alt_clk    : out    std_logic;    
 	mode       : in    std_logic_vector(1 downto 0);  --sel upper addr bits
     --lpc slave interf
@@ -84,6 +84,7 @@ entity design_top is
     fl_data    : inout std_logic_vector(15 downto 0);
     fl_rp_n    : out   std_logic;       --reset signal
     fl_sts     : in    std_logic;        --status signal
+	fl_sts_en    : out std_logic;       --enable status signal wiht highZ out
     --USB parallel interface
     usb_rd_n   : inout  std_logic;  -- enables out data if low (next byte detected by edge / in usb chip)
     usb_wr     : inout  std_logic;  -- write performed on edge \ of signal
@@ -153,8 +154,7 @@ component flash_if
     -- mem Bus
     mem_addr  : in std_logic_vector(23 downto 0);
     mem_do    : out std_logic_vector(15 downto 0);
-    mem_di    : in  std_logic_vector(15 downto 0);
-     
+    mem_di    : in  std_logic_vector(15 downto 0);     
     mem_wr    : in  std_logic;  --write not read signal
     mem_val   : in  std_logic;
     mem_ack   : out std_logic
@@ -166,7 +166,10 @@ component usb2mem
   port (
     clk25     : in  std_logic;
     reset_n   : in  std_logic;
+	dongle_ver: in std_logic_vector(15 downto 0);
     -- mem Bus
+    mem_busy_n: in std_logic;
+	mem_idle  : out std_logic; -- '1' if controller is idle (flash is safe for LPC reads)
     mem_addr  : out std_logic_vector(23 downto 0);
     mem_do    : out std_logic_vector(15 downto 0);
     mem_di    : in std_logic_vector(15 downto 0);
@@ -175,6 +178,7 @@ component usb2mem
     mem_ack   : in  std_logic;
     mem_cmd   : out std_logic;
     -- USB port
+	usb_mode_en: in   std_logic;  -- enable this block 
     usb_rd_n   : out  std_logic;  -- enables out data if low (next byte detected by edge / in usb chip)
     usb_wr     : out  std_logic;  -- write performed on edge \ of signal
     usb_txe_n  : in   std_logic;  -- tx fifo empty (redy for new data if low)
@@ -183,6 +187,23 @@ component usb2mem
     ); 
 end component;
 
+component pc_serializer 
+    Port ( --system signals
+           sys_clk : in  STD_LOGIC;
+           resetn  : in  STD_LOGIC;		   
+		   --postcode data port
+           dbg_data : in  STD_LOGIC_VECTOR (7 downto 0);
+           dbg_wr   : in  STD_LOGIC;   --write not read
+		   dbg_full : out STD_LOGIC;   --write not read
+		   dbg_almost_full	: out STD_LOGIC;
+		   dbg_usedw		: out STD_LOGIC_VECTOR (12 DOWNTO 0);		
+		   --debug USB port
+		   dbg_usb_mode_en: in   std_logic;  -- enable this debug mode
+		   dbg_usb_wr     : out  std_logic;  -- write performed on edge \ of signal
+		   dbg_usb_txe_n  : in   std_logic;  -- tx fifo not full (redy for new data if low)
+		   dbg_usb_bd     : inout  std_logic_vector(7 downto 0) --bus data
+);
+end component;
 
 
 --LED signals
@@ -195,6 +216,7 @@ signal    lad_o      : std_logic_vector(3 downto 0);
 signal    lad_oe     : std_logic;
 
 signal    lpc_debug  : std_logic_vector(31 downto 0);
+signal    lpc_debug_cnt  : std_logic_vector(15 downto 0);
 signal    lpc_addr   : std_logic_vector(23 downto 0); --shared address
 signal 	  lpc_data_o : std_logic_vector(7 downto 0); 
 signal 	  lpc_data_i : std_logic_vector(7 downto 0); 
@@ -206,7 +228,14 @@ signal    lena_reads : std_logic;  --enable/disables all read capabilty to make 
 
 signal    c25_lpc_val  : std_logic;
 signal    c25_lpc_wr     : std_logic;        --shared write not read
+signal    c25_lpc_wr_long : std_logic;        --for led debug data latching
+
+signal    c33_lpc_wr_long : std_logic;        --for led debug data latching
 signal    c33_lpc_wr     : std_logic;        --for led debug data latching
+signal    c33_lpc_wr_wait: std_logic;        --for led debug data latching
+signal    c33_lpc_wr_waitd: std_logic;        --for led debug data latching
+signal    c33_wr_cnt     : std_logic_vector(23 downto 0);        --for led debug data latching
+
 
 --End lpc signals
 
@@ -228,6 +257,18 @@ signal    fl_oe_n_w : std_logic;    --output enable for flash
 --END flash signals
 
 --USB signals
+signal    dbg_data :  STD_LOGIC_VECTOR (7 downto 0);
+signal    c25_dbg_addr_d :  STD_LOGIC_VECTOR (7 downto 0);
+signal    c33_dbg_addr_d :  STD_LOGIC_VECTOR (7 downto 0);
+
+signal    dbg_wr   : STD_LOGIC;   --write not read
+signal    dbg_full : STD_LOGIC;   --write not read
+signal	  dbg_almost_full	: STD_LOGIC;
+signal	  dbg_usedw		: STD_LOGIC_VECTOR (12 DOWNTO 0);
+
+signal    dbg_usb_mode_en    : std_logic;
+signal    usb_mode_en    : std_logic;
+signal    mem_idle   : std_logic;
 signal    umem_addr  : std_logic_vector(23 downto 0);
 signal    umem_do    : std_logic_vector(15 downto 0);
 signal    umem_wr    : std_logic;
@@ -235,23 +276,36 @@ signal    umem_val   : std_logic;
 signal    umem_ack   : std_logic;
 signal    umem_cmd   : std_logic;
 signal    enable_4meg: std_logic;
+
+constant dongle_ver  : std_logic_vector(15 downto 0):=x"8605";
 --END USB signals
 
 begin
 
 --GPIO PINS START
+fl_sts_en <='Z';
+hdr(1) <= fl_sts when resetn='1' else
+		  '0';
 
-hdr(2) <= '0'; --create low pin for jumper pair 5-6 (this pin is 6 on J1 header)
+--when jumper on then mem read and firmware read enabled else only firmware read
 hdr(0) <= 'Z';
 lena_mem_r <= not hdr(0); -- disabled if jumper is not on header pins 1-2
-lena_reads <= hdr(3); -- disabled if jumper is on (jumper makes it a postcode only device)
+
+-- jumper on pins 5,6 then postcode only mode (no mem device)
+hdr(2) <= '0'; --create low pin for jumper pair 5-6 (this pin is 6 on J1 header)
+lena_reads <= hdr(3) and mem_idle; -- disabled if jumper is on (jumper makes it a postcode only device) paired with hdr(2) pins 5,6 and when usb control is not accessing flash
+
+
+-- when jumper on pins 7,8 then post code capture mode enabled
+hdr(4)<= '0';
+dbg_usb_mode_en <= not hdr(5);  --weak pullup on hdr(5) paired with hdr(4)
+usb_mode_en <= not dbg_usb_mode_en;  
 
 --GPIO PINS END
 
 --LED SUBSYSTEM START
-
-data_to_disp <= x"86"&lpc_debug(7 downto 0);	--x"C0DE"; -- ASSIGN data to be displayed (should be regitered)
-
+data_to_disp <= x"86"&lpc_debug(7 downto 0) when usb_mode_en='1' else	--x"C0DE"; -- ASSIGN data to be displayed (should be regitered)
+				"000"&dbg_usedw;  --show tx fifo state on leds when postcode capture mode
 --########################################--
 	  		--VERSION CONSTATNS
 --########################################--
@@ -263,7 +317,9 @@ LEDS: led_sys   --toplevel for led system
 	lsn_hib => "01111101",--6   --Least signif. of hi byte
  	msn_lob => "10111111",--0  --Most signif. of hi byte   This is version code
 	--lsn_lob => "01001111" --3   --Least signif. of hi byte	This is version code
-	lsn_lob => "01100110" --4   --Least signif. of hi byte	This is version code
+	--lsn_lob => "01100110" --4   --Least signif. of hi byte	This is version code
+    lsn_lob => "01101101" --5    --sync with dongle version const.  Least signif. of hi byte This is version code
+	
   )
   port map(
     clk				=> sys_clk , -- in std_logic;
@@ -333,7 +389,7 @@ LPCBUS : lpc_iow
 				  mem_do(15 downto 8);
 				
 	lpc_ack <= c33_mem_ack when lpc_val='1' and lpc_wr='0' else
-			   '1' when lpc_val='1' and lpc_wr='1' else
+			   (not dbg_almost_full) when lpc_val='1' and lpc_wr='1' else
 			   '0';
 			
 
@@ -347,12 +403,19 @@ LPCBUS : lpc_iow
 	end process SYNC1;
 	
 	
-	SYNC2: process (sys_clk, resetn) --c25
+	dbg_data <= lpc_debug(7 downto 0);
+	SYNC2: process (sys_clk) --c25
 	begin 
  		if sys_clk'event and sys_clk = '1' then    -- rising clock edge
-			c25_lpc_val <= lpc_val;
-			c25_lpc_wr <= lpc_wr;
-  		end if;
+			c25_lpc_val <= lpc_val;		--syncro two clock domains
+			c25_lpc_wr <= c33_lpc_wr;	--syncro two clock domains
+			c25_dbg_addr_d <= c33_dbg_addr_d; --syncro two clock domains
+			if usb_mode_en ='0' and c25_dbg_addr_d=x"80" then  --don't fill fifo in regular mode
+				dbg_wr<= c25_lpc_wr; --c33_lpc_wr_wait;--c33_lpc_wr_wait;
+			else
+				dbg_wr<='0';   --write never rises when usb_mode_en = 1
+			end if;
+		end if;
 	end process SYNC2;	
 
 				
@@ -361,11 +424,13 @@ LPCBUS : lpc_iow
 	begin  
 		if lreset_n='0' then
 			lpc_debug(7 downto 0)<=(others=>'0');
+			c33_dbg_addr_d <=(others=>'0');
 			enable_4meg <='0';
 			c33_lpc_wr <='0';
  		elsif lclk'event and lclk = '1' then    -- rising clock edge
-			c33_lpc_wr <= lpc_wr;			--just for debug delay
+			c33_lpc_wr <= lpc_wr;
 			if c33_lpc_wr='0' and  lpc_wr='1' then
+				c33_dbg_addr_d <= lpc_addr(7 downto 0);
 				lpc_debug(7 downto 0)<= lpc_data_o;
 				if lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"4F" then   --Flash 4 Mega enable (LSN is first MSN is second)
 					enable_4meg <='1';
@@ -414,7 +479,10 @@ USB: usb2mem
   port map(
     clk25     => sys_clk, -- in  std_logic;
     reset_n   => resetn, -- in  std_logic;
+	dongle_ver => dongle_ver,
     -- mem Bus
+    mem_busy_n=> fl_sts,  --check flash status before starting new command on flash
+	mem_idle  => mem_idle,
     mem_addr  => umem_addr, -- out std_logic_vector(23 downto 0);
     mem_do    => umem_do, -- out std_logic_vector(15 downto 0);
     mem_di    => mem_do, -- in std_logic_vector(15 downto 0);   --from flash
@@ -423,12 +491,32 @@ USB: usb2mem
     mem_ack   => umem_ack, -- in  std_logic;  --from flash
     mem_cmd   => umem_cmd, -- out std_logic;
     -- USB port
+	usb_mode_en => usb_mode_en,
     usb_rd_n   => usb_rd_n, -- out  std_logic;  -- enables out data if low (next byte detected by edge / in usb chip)
     usb_wr     => usb_wr, -- out  std_logic;  -- write performed on edge \ of signal
     usb_txe_n  => usb_txe_n, -- in   std_logic;  -- tx fifo empty (redy for new data if low)
     usb_rxf_n  => usb_rxf_n, -- in   std_logic;  -- rx fifo empty (data redy if low)
     usb_bd     => usb_bd -- inout  std_logic_vector(7 downto 0) --bus data
     ); 
+
+
+DBG : pc_serializer
+    port map ( --system signals
+           sys_clk => sys_clk, -- in  STD_LOGIC;
+           resetn  => resetn, -- in  STD_LOGIC;		   
+		   --postcode data port
+           dbg_data => dbg_data, -- in  STD_LOGIC_VECTOR (7 downto 0);
+           dbg_wr   => dbg_wr, -- in  STD_LOGIC;   --write not read
+		   dbg_full => dbg_full,--: out STD_LOGIC;   --write not read
+		   dbg_almost_full	 => dbg_almost_full,
+		   dbg_usedw	 => dbg_usedw,
+
+		   --debug USB port
+		   dbg_usb_mode_en=> dbg_usb_mode_en, -- in   std_logic;  -- enable this debug mode
+		   dbg_usb_wr     => usb_wr, -- out  std_logic;  -- write performed on edge \ of signal
+		   dbg_usb_txe_n  => usb_txe_n, -- in   std_logic;  -- tx fifo not full (redy for new data if low)
+		   dbg_usb_bd     => usb_bd -- inout  std_logic_vector(7 downto 0) --bus data
+);
 
 
 --END MAIN DATAPATH CONNECTIONS
