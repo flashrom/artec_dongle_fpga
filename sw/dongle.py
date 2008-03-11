@@ -471,7 +471,7 @@ def usage(s):
     print "                 To test dongle erase the flash with command -e"
     print "                 Enables dongle memory tests to be executed by user"
     print " "
-    print " -b              Leave flash blanc after test. Used with option -t"
+    print " -b              Leave flash blank after test. Used with option -t"
     print " -l              Fast poll loop test. Does poll loop 1024 times"
     print "                 used to stress test connection"
     print ""       
@@ -894,7 +894,8 @@ else:
         print 'Dongle HW version code is smaller than 05 some features have been improved on'
         print 'HW code and Quartus FPGA binary file are available at:' 
         print 'http://www.opencores.org/projects.cgi/web/usb_dongle_fpga/overview'
-        print 'Programming is possible with Altera Quartus WE and BYTEBLASTER II cable'
+        print 'Programming is possible with Altera Quartus WE and BYTEBLASTER II cable or'
+        print 'compatible clone like X-Blaster http://www.customcircuitsolutions.com/cable.html'        
     
 if mode.q == 1:   # perform a query from dongle
     
