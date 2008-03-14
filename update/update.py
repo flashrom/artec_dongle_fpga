@@ -46,9 +46,10 @@ import time
 
 #### global funcs ####
 def usage(s):
-    print "Artec's Altera EPCS programming utility ver. 0.2 for USB Dongle"
+    print "Artec's Altera EPCS programming utility ver. 0.2.1 for USB Dongle"
     print "Use with Altera ByteBlaster II programmer or compatible clone on LPT1"
-    print "like X-Blaster http://www.customcircuitsolutions.com/cable.html"
+    print "like X-Blaster http://www.customcircuitsolutions.com/cable.html or"
+    print "http://fpgaguy.110mb.com/"
     print "Usage:"
     print "Query           : ",s," -q"
     print "Write file      : ",s," [-v] <file>"
@@ -161,9 +162,10 @@ class EPCSDevice:
 
         
     def close(self):
-        self.pport.setData(0xFF)
-        self.pport.setAutoFeed(0) #disable BB II tristate buffers to drive
-     
+        epcs.pport.setData(0xFF)
+        epcs.pport.setAutoFeed(1) #disable BB II tristate buffers to drive
+        epcs.clearPPDataBit(3)  #enable Cyclon chip
+        epcs.clearPPDataBit(2)  #enable Cyclon chip     
     
     def setPPDataBit(self,bit_no):
         self._data = self._data|(1<<bit_no)
@@ -498,4 +500,5 @@ elif mode.filename!="":   # then read flag must be up
         sys.exit()                    
 
 epcs.close()
+time.sleep(0.5)
 
