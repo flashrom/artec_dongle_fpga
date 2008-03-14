@@ -84,7 +84,7 @@ entity design_top is
     fl_data    : inout std_logic_vector(15 downto 0);
     fl_rp_n    : out   std_logic;       --reset signal
     fl_sts     : in    std_logic;        --status signal
-	fl_sts_en    : out std_logic;       --enable status signal wiht highZ out
+	fl_sts_en  : out std_logic;       --enable status signal wiht highZ out
     --USB parallel interface
     usb_rd_n   : inout  std_logic;  -- enables out data if low (next byte detected by edge / in usb chip)
     usb_wr     : inout  std_logic;  -- write performed on edge \ of signal
@@ -276,6 +276,7 @@ signal    umem_val   : std_logic;
 signal    umem_ack   : std_logic;
 signal    umem_cmd   : std_logic;
 signal    enable_4meg: std_logic;
+signal    dongle_con_n : std_logic;
 
 constant dongle_ver  : std_logic_vector(15 downto 0):=x"8605";
 --END USB signals
@@ -284,8 +285,10 @@ begin
 
 --GPIO PINS START
 fl_sts_en <='Z';
-hdr(1) <= fl_sts when resetn='1' else
-		  '0';
+
+hdr(1) <= dongle_con_n;
+--hdr(1) <= fl_sts when resetn='1' else
+--		  '0';
 
 --when jumper on then mem read and firmware read enabled else only firmware read
 hdr(0) <= 'Z';
@@ -293,7 +296,7 @@ lena_mem_r <= not hdr(0); -- disabled if jumper is not on header pins 1-2
 
 -- jumper on pins 5,6 then postcode only mode (no mem device)
 hdr(2) <= '0'; --create low pin for jumper pair 5-6 (this pin is 6 on J1 header)
-lena_reads <= hdr(3) and mem_idle; -- disabled if jumper is on (jumper makes it a postcode only device) paired with hdr(2) pins 5,6 and when usb control is not accessing flash
+lena_reads <= hdr(3) and mem_idle and (not dongle_con_n); -- disabled if jumper is on (jumper makes it a postcode only device) paired with hdr(2) pins 5,6 and when usb control is not accessing flash
 
 
 -- when jumper on pins 7,8 then post code capture mode enabled
@@ -345,7 +348,7 @@ LPCBUS : lpc_iow
     --system signals
     lreset_n   => lreset_n, -- in  std_logic;
     lclk       => lclk, -- in  std_logic;
-	lena_mem_r => lena_mem_r,--: in  std_logic;  --enable full adress range covering memory read block
+	lena_mem_r => lena_mem_r, --: in  std_logic;    --enable full adress range covering memory read block
 	lena_reads => lena_reads, -- : in  std_logic;  --enable read capabilities, : in  std_logic;  --enable read capabilities
 	--LPC bus from host
     lad_i      => lad_i, -- in  std_logic_vector(3 downto 0);
@@ -427,15 +430,20 @@ LPCBUS : lpc_iow
 			c33_dbg_addr_d <=(others=>'0');
 			enable_4meg <='0';
 			c33_lpc_wr <='0';
+			dongle_con_n <='0';  -- pin 3 in GPIO make it toggleable
  		elsif lclk'event and lclk = '1' then    -- rising clock edge
 			c33_lpc_wr <= lpc_wr;
 			if c33_lpc_wr='0' and  lpc_wr='1' then
 				c33_dbg_addr_d <= lpc_addr(7 downto 0);
 				lpc_debug(7 downto 0)<= lpc_data_o;
-				if lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"4F" then   --Flash 4 Mega enable (LSN is first MSN is second)
+				if lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"F4" then   --Flash 4 Mega enable (LSN is first MSN is second)
 					enable_4meg <='1';
-				elsif lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"1F" then --Flash 1 Mega enalbe
+				elsif lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"F1" then --Flash 1 Mega enalbe
 					enable_4meg <='0';
+				elsif lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"D1" then --Set Dongle not attached signal
+					dongle_con_n <='1';  -- pin 3 in GPIO make it 1
+				elsif lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"D0" then --Set Dongle attached signal
+					dongle_con_n <='0';  -- pin 3 in GPIO make it 1										
 				end if;
 			end if;
   		end if;

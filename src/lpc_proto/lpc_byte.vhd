@@ -34,7 +34,7 @@ entity lpc_iow is
     lreset_n   : in  std_logic;
     lclk       : in  std_logic;
     lena_mem_r : in  std_logic;  --enable lpc regular memory read cycles also (default is only LPC firmware read)
-	 lena_reads : in  std_logic;  --enable read capabilities
+	lena_reads : in  std_logic;  --enable read capabilities
 	--LPC bus from host
     lad_i      : in  std_logic_vector(3 downto 0);
     lad_o      : out std_logic_vector(3 downto 0);
@@ -207,15 +207,15 @@ begin  -- process LPC
         end case; 
       when DATAs => -----------------------------------------------------------
        case cycle_type is           
-        when LPC_IO_W =>                   --IO write cycle              
+        when LPC_IO_W =>              --IO write cycle              
           if r_cnt ="001" then
-            r_data <= r_data(3 downto 0)&lad_i;
+            r_data <= lad_i&r_data(7 downto 4); --LSB first from io cycle
             r_cnt <= "000";
             lpc_wr <='1';             --IO write must accure
             lpc_val <='1';
             CS <= TARs;
           else
-            r_data <= r_data(3 downto 0)&lad_i;
+            r_data <= lad_i&r_data(7 downto 4); --LSB first from io cycle
             r_cnt<=r_cnt + 1;
             CS <= DATAs;
           end if;
