@@ -934,7 +934,7 @@ if mode.filename!="" and mode.address!=-1:
         print 'File size %iK '%(size/1024)
         f.close()
     except IOError:
-         print "IO Error on file open"
+         print "IO Error on file open. File missing or no premission to open."
          sys.exit()
     #clear blockLock bits
     don.write_command(0x0060) # 0x0098
@@ -945,6 +945,10 @@ if mode.filename!="" and mode.address!=-1:
     wordSize = (size+ (size&1))>> 1    # round byte count up and make word address
     endBlock = don.get_block_no(mode.address+wordSize - 1)  
     startBlock = don.get_block_no(mode.address)
+    if endBlock > 32:
+        print "Given file does not fit into remaining space. File size is %i KB"%(size/1024)
+        print "Space left from given offset is %i KB"%((4*1024*1024-mode.address*2)/1024)
+        sys.exit()
     i=startBlock
     print 'Erasing from block %i to %i '%(i,endBlock)
     while i <= endBlock:
