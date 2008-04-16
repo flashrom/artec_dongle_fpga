@@ -438,7 +438,7 @@ if sys.platform=='linux2':
 
 #### global funcs ####
 def usage(s):
-    print "Artec USB Dongle programming utility ver. 2.5"
+    print "Artec USB Dongle programming utility ver. 2.51"
     print "Usage:"
     print "Write file      : ",s," [-vq] -c <name> <file> <offset>"
     print "Readback file   : ",s," [-vq] -c <name> [-vq] -r <offset> <length> <file>"
