@@ -42,6 +42,8 @@
 #                          as dongle never reads 1 byte at the time
 #            18 Apr. 2008  Added file size boundary check on write to see if remaining size from
 #                          given offset fits the file size
+
+#            24 Apr. 2008  Mac OS X support by Stefan Reinauer <stepan@coresystems.de>
 #-------------------------------------------------------------------------
 
 import os
@@ -132,6 +134,12 @@ elif sys.platform=='linux2':
     import exceptions
     import array
     print "Linux platform detected:"
+elif sys.platform=='darwin':
+    from termios import *
+    import fcntl
+    import exceptions
+    import array
+    print "Mac OS X platform detected:"
 else:
     sys.exit('Sorry, no implementation for this platform yet')
 
@@ -276,7 +284,7 @@ if sys.platform=='win32':
 
 
                   
-if sys.platform=='linux2':                  
+if sys.platform=='linux2':
   class SerialPortLin:
     """Encapsulate methods for accesing to a serial port."""
 
@@ -431,6 +439,161 @@ if sys.platform=='linux2':
         tcflush(self.__handle, TCIOFLUSH)                  
 
 
+if sys.platform=='darwin':
+  class SerialPortOSX:
+    """Encapsulate methods for accesing to a serial port."""
+
+    BaudRatesDic={
+        110: B110,
+        300: B300,
+        600: B600,
+        1200: B1200,
+        2400: B2400,
+        4800: B4800, 
+        9600: B9600,
+        19200: B19200,
+        38400: B38400,
+        57600: B57600,
+        115200: B115200,
+        230400: B230400
+        }
+    buf = array.array('h', '\000'*4)
+
+    def __init__(self, dev, timeout=None, speed=115200, mode='232', params=None):
+        self.__devName, self.__timeout, self.__speed=dev, timeout, speed
+        self.__mode=mode
+        self.__params=params
+        self.__speed = 0
+        self.__reopen = 0
+        while 1:
+            try:
+                self.__handle=os.open(dev, os.O_RDWR)
+                break
+                        
+            except:
+                n=0
+                while (n < 2000000):
+                    n += 1;                
+                self.__reopen = self.__reopen + 1
+            if self.__reopen > 32:
+                print "Port does not exist..."
+                raise SerialPortException('Port does not exist...')
+                break
+
+        self.__configure()
+
+    def __del__(self):
+	if self.__speed:
+            #tcsetattr(self.__handle, TCSANOW, self.__oldmode)
+            pass
+            try:
+                pass
+                #os.close(self.__handle)
+            except IOError:
+                raise SerialPortException('Unable to close port')
+
+
+    def __configure(self):
+        if not self.__speed:
+            self.__speed=115200
+        
+        # Save the initial port configuration
+        self.__oldmode=tcgetattr(self.__handle)
+        if not self.__params:
+            # print "Create MacOSX params for serialport..."
+            # self.__params is a list of attributes of the file descriptor
+            # self.__handle as follows:
+            # [c_iflag, c_oflag, c_cflag, c_lflag, c_ispeed, c_ospeed, cc]
+            # where cc is a list of the tty special characters.
+            self.__params=[]
+            # c_iflag
+            self.__params.append(IGNPAR)           
+            # c_oflag
+            self.__params.append(0)                
+            # c_cflag
+            self.__params.append(CS8|CREAD|CRTSCTS) 
+            # c_lflag
+            self.__params.append(0)                
+            # c_ispeed
+            self.__params.append(SerialPortOSX.BaudRatesDic[self.__speed]) 
+            # c_ospeed
+            self.__params.append(SerialPortOSX.BaudRatesDic[self.__speed]) 
+	    cc=[0]*NCCS
+        if self.__timeout==None:
+            # A reading is only complete when VMIN characters have
+            # been received (blocking reading)
+            cc[VMIN]=1
+            cc[VTIME]=0
+        elif self.__timeout==0:
+            cc[VMIN]=0
+            cc[VTIME]=0
+        else:
+            cc[VMIN]=0
+            cc[VTIME]=self.__timeout #/100
+        self.__params.append(cc)               # c_cc
+        
+        tcsetattr(self.__handle, TCSANOW, self.__params)
+    
+
+    def fileno(self):
+        return self.__handle
+
+
+    def __read1(self):
+        tryCnt = 0
+        byte = ""
+        while(len(byte)==0 and tryCnt<10):
+            tryCnt+=1
+            byte = os.read(self.__handle, 2)
+        if len(byte)==0 and self.__timeout!=0: # Time-out
+            print 'Time out cnt was %i'%(tryCnt) 
+            print 'Expected 1 byte but got %i before timeout'%(len(byte))
+            sys.stdout.flush()
+            raise SerialPortException('Timeout')
+        else:
+            return byte
+            
+
+    def read(self, num=1):
+        s=''
+        for i in range(num/2):
+            s=s+SerialPortOSX.__read1(self)
+        return s
+
+
+    def readline(self):
+
+        s = ''
+        while not '\n' in s:
+            s = s+SerialPortOSX.__read1(self)
+
+        return s 
+
+        
+    def write(self, s):
+        """Write the string s to the serial port"""
+        return os.write(self.__handle, s)
+        
+    def inWaiting(self):
+        """Returns the number of bytes waiting to be read"""
+    	data = struct.pack("L", 0)
+        data=fcntl.ioctl(self.__handle, FIONREAD, data)
+    	return struct.unpack("L", data)[0]
+
+    def outWaiting(self):
+        """Returns the number of bytes waiting to be write
+        mod. by J.Grauheding
+        result needs some finetunning
+        """
+        rbuf=fcntl.ioctl(self.__handle, FIONWRITE, self.buf)
+        return rbuf
+
+    
+    def flush(self):
+        """Discards all bytes from the output or input buffer"""
+        tcflush(self.__handle, TCIOFLUSH)                  
+
+
 
 #### end inline of artec FTDI spesific Uspp code ###############################################
 
@@ -440,7 +603,7 @@ if sys.platform=='linux2':
 
 #### global funcs ####
 def usage(s):
-    print "Artec USB Dongle programming utility ver. 2.52"
+    print "Artec USB Dongle programming utility ver. 2.6"
     print "Usage:"
     print "Write file      : ",s," [-vq] -c <name> <file> <offset>"
     print "Readback file   : ",s," [-vq] -c <name> [-vq] -r <offset> <length> <file>"
@@ -482,6 +645,7 @@ def usage(s):
     print " ",s," -c COM3 loader.bin 0                       "
     print " ",s," -c /dev/ttyS3 boot.bin 3840K"
     print " ",s," -c COM3 -r 0x3C0000 256K flashcontent.bin"
+    print " ",s," -c /dev/cu.usbserial-003011FD -v (Mac OS X)"
 ######################
 
 
@@ -532,8 +696,10 @@ class Dongle:
         try:
             if sys.platform=='win32':
                 self.tty = SerialPortWin(name,timeout, baud)
-            else: 
+            elif sys.platform=='linux2': 
                 self.tty = SerialPortLin(name,timeout, baud)
+            elif sys.platform=='darwin': 
+                self.tty = SerialPortOSX(name,timeout, baud)
             
         except SerialPortException , e:
             print "Unable to open port " + name
@@ -722,7 +888,7 @@ class Dongle:
             if sys.platform=='win32':
                 while (n < 1024):
                     n += 1;
-            elif sys.platform=='linux2':
+            elif sys.platform=='linux2' or sys.platform=='darwin':
                 #Linux FTDI VCP driver is way faster and needs longer grace time than windows driver
                 while (n < 1024*8):
                     n += 1;                    
@@ -855,6 +1021,9 @@ else:
     elif sys.platform=='linux2':
         don  = Dongle(mode.portname,230400,6000)
         #don.tty.cts()
+    elif sys.platform=='darwin':
+        don  = Dongle(mode.portname,230400,6000)
+        #don.tty.cts()
     else:
         sys.exit('Sorry, no implementation for this platform yet')
     
@@ -874,6 +1043,9 @@ else:
         if sys.platform=='win32':
             don  = Dongle(mode.portname,256000,6000)
         elif sys.platform=='linux2':
+            don  = Dongle(mode.portname,230400,6000)
+            #self.tty.cts()
+        elif sys.platform=='darwin':
             don  = Dongle(mode.portname,230400,6000)
             #self.tty.cts()
         else:
