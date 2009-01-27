@@ -34,7 +34,7 @@
 # History:   12 oct. 2006  Version 1.0 released
 #            22 Feb. 2007  Test options added to test PCB board
 #            10 Nov. 2007  Added open retry code to dongle
-#            14 Nov. 2007  Moved dongle spesific code to class Dongle from USPP
+#            14 Nov. 2007  Moved dongle specific code to class Dongle from USPP
 #                          USPP is allmost standard now (standard USPP would work)
 #                          Artec USPP has serial open retry
 #            14 Nov. 2007  Improved help. 
@@ -44,6 +44,10 @@
 #                          given offset fits the file size
 
 #            24 Apr. 2008  Mac OS X support by Stefan Reinauer <stepan@coresystems.de>
+#            09 Oct. 2008  Added Dongle ver 86 20 support. Support for mode setting
+#                          PCB ver read and PSRAM read write support. (PSRAM is on Dongle II boards)
+#            03 Nov. 2008  Added Dongle II board changes to PSRAM write so that the bytes are not swapped
+#                          by dongle.py but in hardware pipeline
 #-------------------------------------------------------------------------
 
 import os
@@ -54,7 +58,7 @@ import struct
 from sets import *
 from struct import *
 
-#### inline of artec FTDI spesific Uspp code ###################################################
+#### inline of artec FTDI specific Uspp code ###################################################
 
 ##########################################################################
 # USPP Library (Universal Serial Port Python Library)
@@ -98,7 +102,7 @@ from struct import *
 #            24/02/2006: Final version 1.0.
 #            10/11/2007: Added open retry code to dongle
 #                        by Jyri Toomessoo jyrit@artecdesign.ee
-#            14/11/2007: Moved dongle spesific code to class Dongle from USPP
+#            14/11/2007: Moved dongle specific code to class Dongle from USPP
 #                        USPP is allmost standard now (standard USPP would work)
 #                        Artec USPP has serial open retry
 #                        by Jyri Toomessoo jyrit@artecdesign.ee
@@ -193,7 +197,7 @@ if sys.platform=='win32':
                     n += 1;                
                 self.__reopen = self.__reopen + 1
             if self.__reopen > 32:
-                print "Port does not exist..."
+                print "Port does not exist... retries exhausted..."
                 raise SerialPortException('Port does not exist...')
                 break
                 #sys.exit()
@@ -595,7 +599,7 @@ if sys.platform=='darwin':
 
 
 
-#### end inline of artec FTDI spesific Uspp code ###############################################
+#### end inline of artec FTDI specific Uspp code ###############################################
 
 
 #### Dongle code starts here  ##################################################################
@@ -603,7 +607,7 @@ if sys.platform=='darwin':
 
 #### global funcs ####
 def usage(s):
-    print "Artec USB Dongle programming utility ver. 2.6"
+    print "Artec USB Dongle programming utility ver. 2.7 prerelease"
     print "Usage:"
     print "Write file      : ",s," [-vq] -c <name> <file> <offset>"
     print "Readback file   : ",s," [-vq] -c <name> [-vq] -r <offset> <length> <file>"
@@ -612,7 +616,9 @@ def usage(s):
     print "        file:    File name to be written to dongle"
     print "        offset:  Specifies data writing starting point in bytes to 4M window"
     print "                 For ThinCan boot code the offset = 4M - filesize. To write"
-    print "                 256K file the offset must be 3840K"
+    print "                 256K file the offset must be 3840K or EOF"
+    print "                 EOF marker will cause the dongle.py to calculate suitable offset"    
+    print "                 and also cause files with odd byte count to be front padded"        
     print " "
     print " -c <name>       Indicate port name where the USB Serial Device is"
     print "        name:    COM port name in Windows or Linux Examples: COM3,/dev/ttyS3"
@@ -639,6 +645,10 @@ def usage(s):
     print " -b              Leave flash blank after test. Used with option -t"
     print " -l              Fast poll loop test. Does poll loop 1024 times"
     print "                 used to stress test connection"
+    print " -p and -P       Used to change ldev_present_n signal on Dongle II LPC interface"
+    print "                 -p will cause the signal to go low and -P to go high"
+    print "                 from reset and when dongle FPGA is not configured the signal is low."
+    print "                 The state is not held when power is disconnected"
     print ""       
     print "Examples:"
     print ""
@@ -660,12 +670,18 @@ class DongleMode:
         self.e = 0
         self.b = 0
         self.l = 0
+        self.p = 0
+        self.u = 0
         self.filename=""
         self.portname=""
         self.address=-1
+        self.eof=-1
+        self.oddSize=0
+        self.oddAddr=0
         self.offset=-1
         self.length=-1
         self.version=4
+        self.region=-1
      
     def convParamStr(self,param):
         mult = 1
@@ -742,6 +758,7 @@ class Dongle:
         
     def write_2bytes(self, msb,lsb):
         """Write one word MSB,LSB to the serial port MSB first"""
+        #print "---------->  CMD %02x %02x"%(msb,lsb)
         s = pack('BB', msb, lsb)
         ret = self.tty.write(s)
         if(ret<len(s)):
@@ -773,7 +790,7 @@ class Dongle:
         msbyte = (address>>16)&0xff
         evaluate = (address>>24)
         if evaluate != 0:
-            print "Addressign fault. Too large address passed"
+            print "Addressing fault. Too large address passed"
             sys.exit()
         self.write_2bytes(lsbyte,0xA0)            #set internal address to dongle
         self.write_2bytes(byte,0xA1)            #set internal address to dongle
@@ -783,7 +800,7 @@ class Dongle:
         command = 0
         byteCount = wordCount<<1  #calc byte count
         if wordCount>0 :
-            command = (command|wordCount)<<8;
+            command = (command|wordCount)<<8
             command = command|0xCD
             self.set_address(address)    # send read address
             self.write_command(command)  # send get data command
@@ -797,7 +814,7 @@ class Dongle:
         command = 0
         wordCount = 0
         byteCount = wordCount<<1  #calc byte count
-        command = (command|wordCount)<<8;
+        command = (command|wordCount)<<8
         command = command|0xCD
         self.write_command(command)  # send get data command
 
@@ -809,7 +826,7 @@ class Dongle:
         command = 0
         wordCount= 1  #calc byte count
         byteCount = wordCount<<1
-        command = (command|wordCount)<<8;
+        command = (command|wordCount)<<8
         command = command|0xCD
         self.write_command(command)  # send get data command
         return self.getReturn(byteCount)
@@ -861,6 +878,65 @@ class Dongle:
         #self.wait_on_busy()
         #self.parse_status()
     
+    def buffer_write_ram(self,startAddress,word_buf):
+        wordsWritten = 0
+        length = len(word_buf)  # get the byte count
+        #print "block write request for word cnt= %i"%(length//2)
+        if length == 65536*2:
+            #print "block write word cnt = 65536"
+            adrBuf = self.get_address_buf(startAddress+wordsWritten)   #6 bytes total         
+            cmd_e8=""  #8 bytes total
+            cmd_e8+= chr(0)   #write word count 0 is 64K words
+            cmd_e8+= chr(0xE9)              
+            buffer = adrBuf+cmd_e8 #prepare command
+            #i=0
+            #while i<65536*2:
+            #    buffer = buffer + word_buf[wordsWritten*2+i+1]+word_buf[wordsWritten*2+i]
+            #    i=i+2
+            #print "block write buffer size = %i"%(len(word_buf[:wordsWritten*2+65536*2]))
+            buffer = buffer + word_buf[0:wordsWritten*2+65536*2]
+            self.tty.write(buffer)
+            wordsWritten = wordsWritten + 65536 - 2  #two last words are written brokenly bu large block write
+            length = length - 65536*2 + 4 # this amout has been written (two last words are written brokenly bu large block write)
+        if length >= 32:  # can't write in one go so we must loop the code
+            while length>=32:  #if we have atleast 32 bytes
+                cmd_e8=""  #8 bytes total
+                adrBuf = self.get_address_buf(startAddress+wordsWritten)   #6 bytes total
+                #print "block write word cnt = 16"
+                cmd_e8+= chr(16)   #write word count 16 is 32 bytes
+                cmd_e8+= chr(0xE9)              
+                buffer = adrBuf + cmd_e8 #prepare command
+                #i=0
+                #while i<32:
+                #    #print "Adding to write buffer %02x%02x"%(ord(word_buf[i+1]),ord(word_buf[i]))
+                #    buffer = buffer + word_buf[wordsWritten*2+i+1]+word_buf[wordsWritten*2+i]
+                #    i=i+2
+                #print "block write buffer size = %i"%(len(word_buf[wordsWritten*2:wordsWritten*2+32]))
+                buffer = buffer + word_buf[wordsWritten*2:wordsWritten*2+32]
+                self.tty.write(buffer) #ok buffer is filled
+                wordsWritten = wordsWritten + 16
+                length = length - 32 # this amout has been written
+        #and finally deal with smaller writes than 64K or 16 word blocks
+        if length%2==1:  #uneven byte count given we must add one byte of padding
+            print "uneaven write byte count, length = %i padding the end with extra byte 0xff "%(length)
+            word_buf=word_buf+chr(0xFF)
+        if length > 0:    
+            #print "block write tail word cnt= %i"%(length//2+length%2)
+            adrBuf = self.get_address_buf(startAddress+wordsWritten)   #6 bytes total
+            cmd_e8=""  #8 bytes total
+            cmd_e8+= chr(length//2+length%2)   #write word count 0 is 64K words
+            cmd_e8+= chr(0xE9)              
+            buffer = adrBuf + cmd_e8
+            #i=0
+            #while i<length+length%2:
+            #    buffer = buffer + word_buf[wordsWritten*2+i+1]+word_buf[wordsWritten*2+i]
+            #    i=i+2
+            #print "block write buffer size = %i"%(len(word_buf[wordsWritten*2:wordsWritten*2+length+length%2]))
+            buffer = buffer + word_buf[wordsWritten*2:wordsWritten*2+length+length%2]
+            self.tty.write(buffer)             
+        
+                 
+        
     def buffer_write(self,wordCount,startAddress,buffer):
         # to speed up buffer writing compose all commands into one buffer
         # instead of multiple single writes this is needed as the FTDI chip
@@ -926,11 +1002,619 @@ class Dongle:
             buffer[33], buffer[32], buffer[35], buffer[34], buffer[37], buffer[36], buffer[39], buffer[38],
             buffer[41], buffer[40], buffer[42], buffer[43]
             )
-            
             ret = self.tty.write(s)
 
+
+############# Main program functions #################### 
+
+def flash_write(mode,don):
+    #Calculate number of blocks and start of blocks
+    size = 0
+    if mode.address&1 == 1:
+        mode.oddAddr=1
+    mode.address = mode.address>>1  #make word address
+    try:
+        f=open(mode.filename,"rb")
+        f.seek(0,2) #seek to end
+        size = f.tell()
+        f.seek(0) #seek to start
+        print 'File size %iK '%(size/1024)
+        f.close()
+    except IOError:
+         print "IO Error on file open. File missing or no premission to open."
+         don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+         don.write_command(0xC6C5)   #clear lock bit
+         ret_buf=don.getReturn(2)    #two bytes expected to this command         
+         sys.exit()
+         
+    if mode.eof==1:
+        if (size&1==1):
+            mode.oddSize = 1            
+        region_size_w = 0x200000     # 4M region word count
+        #print "Given region size = %i bytes"%(region_size_w*2)
+        file_size_w = (size+ (size&1))>> 1
+        #print "Given file size = %i bytes"%(file_size_w*2)
+        mode.address = region_size_w - file_size_w
+        print "Offset will be 0x%x"%(mode.address*2)
         
+         
+    #clear blockLock bits
+    don.write_command(0x0060) # 0x0098
+    don.write_command(0x00D0) # 0x0098
+    if mode.version < 5:
+        don.wait_on_busy()
+        don.parse_status()
+    wordSize = (size+ (size&1))>> 1    # round byte count up and make word address    
+    endBlock = don.get_block_no(mode.address+wordSize - 1)  
+    startBlock = don.get_block_no(mode.address)
+    if endBlock >= 32:
+        print "Given file does not fit into remaining space. File size is %i KB"%(size/1024)
+        print "Space left from given offset is %i KB"%((4*1024*1024-mode.address*2)/1024)
+        don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+        don.write_command(0xC6C5)   #clear lock bit
+        ret_buf=don.getReturn(2)    #two bytes expected to this command                 
+        sys.exit()
+    i=startBlock
+    print 'Erasing from block %i to %i '%(i,endBlock)
+    while i <= endBlock:
+        if mode.v == 1:
+            print 'Erasing block %i '%(i)
+        else:
+            sys.stdout.write(".")
+            sys.stdout.flush()
+        don.erase_block(i)
+        if mode.version < 5:
+            don.wait_on_busy()
+            don.parse_status()   #do this after programming all but uneaven ending
+        i=i+1
+    if mode.v == 0:
+        print " "
+    f=open(mode.filename,"rb")
+    f.seek(0) #seek to start
+    address= mode.address
+    #don.set_address(address)
+    print 'Writing %iK'%(size/1024)
+    while 1:
+        if (address/(1024*64) != (address-16)/(1024*64)) and address != mode.address:  # get bytes from words if 512
+            if mode.v == 1:
+                print 'Progress: %iK of %iK at 0x%06x'%((address-mode.address)/512,size/1024,address)
+            else:
+                sys.stdout.write(".")
+                sys.stdout.flush()
+        if mode.oddSize==1 or mode.oddAddr==1:  
+            mode.oddSize = 0   # odd file size when writing BIOS to the end of region should be also front padded
+            mode.oddAddr = 0   # as odd address is shifted right padding should be added in front of data
+            buf = "\xFF"+f.read(31)  #16 words is maximum write here bytes are read
+        else:
+            buf = f.read(32)  #16 words is maximum write here bytes are read
+            
+        if len(buf)==32:
+            don.buffer_write(16,address,buf)
+            address = address + 16
+        elif len(buf)>0:
+            don.parse_status()   #do this after programming all but uneaven ending
+            print "Doing an unaligned write..."
+            length = len(buf)
+            length = (length + (length&1))>> 1   #round up to get even word count
+            buf = buf+"\xff"   #pad just in case rounding took place
+            don.buffer_write(len,address,buf)
+            address = address + 16     #inc word address
+            break
+        else:
+            break
+    if mode.v == 0:
+        print " "
+    if mode.version >= 5:
+        print "Waiting for buffers to empty"
+        don.wait_on_busy()
+        don.parse_status()   #do this after programming all but uneaven ending        
+    print "Write DONE!"
+    don.parse_status()   #do this after programming all but uneaven ending
+    f.close()                
+    don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+    
+    
+    
+def psram_write(mode,don):
+    #Calculate number of blocks and start of blocks
+    size = 0
+    if mode.address&1 == 1:
+        mode.oddAddr=1    
+    mode.address = mode.address>>1  #make word address
+    #check that file exists
+    try:
+        f=open(mode.filename,"rb")
+        f.seek(0,2) #seek to end
+        size = f.tell()
+        f.seek(0) #seek to start
+        print 'File size %iK '%(size/1024)
+        f.close()
+    except IOError:
+         print "IO Error on file open. File missing or no premission to open."
+         don.write_command(0xC6C5)   #clear lock bit
+         ret_buf=don.getReturn(2)    #two bytes expected to this command                  
+         sys.exit()
+
+    if mode.eof==1:
+        if (size&1==1):
+            mode.oddSize = 1   # deal with odd file sizes        
+        region_size_w = 0x200000     # 4M region word count
+        #print "Given region size = %i bytes"%(region_size_w*2)
+        file_size_w = (size+ (size&1))>> 1
+        #print "Given file size = %i bytes"%(file_size_w*2)
+        mode.address = region_size_w - file_size_w
+        print "Offset will be 0x%x"%(mode.address*2)
+                  
+         
+    #check that file size fits to remaining space given     
+    wordSize = (size+ (size&1))>> 1    # round byte count up and make word address
+    endBlock = don.get_block_no(mode.address+wordSize - 1)  
+    startBlock = don.get_block_no(mode.address)
+    if endBlock >= 32:
+        print "Given file does not fit into remaining space. File size is %i KB"%(size/1024)
+        print "Space left from given offset is %i KB"%((4*1024*1024-mode.address*2)/1024)
+        don.write_command(0xC6C5)   #clear lock bit
+        ret_buf=don.getReturn(2)    #two bytes expected to this command                 
+        sys.exit()
+    i=startBlock
+    #Start writing the file content to dongle PSRAM
+    f=open(mode.filename,"rb")
+    f.seek(0) #seek to start
+    address= mode.address
+    #don.set_address(address)
+    print 'Writing %iK'%(size/1024)
+    while 1:
+        if (address/(1024*64) != (address-16)/(1024*64)) and address != mode.address:  # get bytes from words if 512
+            if mode.v == 1:
+                print 'Progress: %iK of %iK at 0x%06x'%((address-mode.address)/512,size/1024,address)
+            else:
+                sys.stdout.write(".")
+                sys.stdout.flush()
+        if mode.oddSize==1 or mode.oddAddr==1:
+            mode.oddSize = 0
+            mode.oddAddr = 0
+            buf = "\xFF"+f.read(65536*2-1)  #65536 words is maximum write here bytes are read (*2 is byte count)
+        else:
+            buf = f.read(65536*2)  #65536 words is maximum write here bytes are read (*2 is byte count)
+            
+        if len(buf)==65536*2:
+            don.buffer_write_ram(address,buf)
+            address = address + 65536  # add word count
+        elif len(buf)>0:
+            print "Doing an unaligned write..."
+            length = len(buf)
+            don.buffer_write_ram(address,buf)
+            address = address + length//2     #inc word address
+            break
+        else:
+            break
+    if mode.v == 0:
+        print " "       
+    print "Write DONE!"
+    f.close()         
+    
+    
+def flash_read(mode,don):
+    if mode.offset!=-1 and mode.length!=-1 and mode.filename!="":
+        if mode.version >= 5:
+            ##################### from hw ver 5 readback code ##################################################
+            blockCount = (mode.length>>17)+1 #read this many 64K word blocks
+            mode.offset=mode.offset>>1    #make word offset
+            lastLength = mode.length&0x0001FFFF  
+            mode.length= mode.length>>1   #make word length
+            if mode.length < 512:                
+                print 'Reading %i bytes in single block '%(lastLength)
+            else:
+                print 'Reading %iK '%(mode.length/512)
+            don.write_command(0x00FF) #  put flash to data read mode
+            try:
+                f=open(mode.filename,"wb")  #if this fails no point in reading as there is nowhere to write
+                address = mode.offset    # set word address
+                don.set_address(address)
+                i=0
+                while (i<blockCount):
+                    don.issue_blk_read()  # request 64K words from current address
+                    buf=don.getReturn(65536*2) #Read all words
+                    if (i==blockCount-1):  #last block
+                        f.write(buf[:lastLength])
+                    else:
+                        f.write(buf) ## must tuncate the buffer
+                    if mode.v == 1:
+                        print 'Got block %i'%(i+1)
+                    else:
+                        sys.stdout.write(".")
+                        sys.stdout.flush()
+                    i+=1
+                f.close()    
+            except IOError:
+                print "IO Error on file open"
+                don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+                don.write_command(0xC6C5)   #clear lock bit
+                ret_buf=don.getReturn(2)    #two bytes expected to this command                         
+                sys.exit()                    
+            ##################### end from hw ver 5 readback code  ############################################ 
+        else:
+            ##################### before hw ver 5 readback code ###############################################
+            mode.offset=mode.offset>>1    #make word offset
+            mode.length= mode.length>>1   #make word length
+            print 'Reading %iK'%(mode.length/512)
+            try:
+                f=open(mode.filename,"wb")
+                don.write_command(0x00FF) #  put flash to data read mode
+                address = mode.offset    # set word address
+                while 1:
+                    if address/(1024*32) != (address-128)/(1024*32):  # get K bytes from words if 512
+                        if mode.v == 1:
+                            print 'Progress: %iK of %iK'%((address-mode.offset)/512,mode.length/512)
+                        else:
+                            sys.stdout.write(".")
+                            sys.stdout.flush()
+                    buf=don.read_data(128,address)  # word count and byte address read 64 words to speed up
+                    f.write(buf)
+                    #print "from address:",address<<1," ", len(buf)
+                    if address+128 >= (mode.offset + mode.length):  # 2+64 estimates the end to end in right place
+                        break
+                    address = address + 128    #this is word address
+                f.close()
+                if mode.v == 0:
+                    print " "            
+                print "Readback done!"
+            except IOError:
+                print "IO Error on file open"
+                don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+                don.write_command(0xC6C5)   #clear lock bit
+                ret_buf=don.getReturn(2)    #two bytes expected to this command                         
+                sys.exit()        
+       ##################### end before hw ver 5 readback code  ################################################ 
+    else:
+       print "Some of readback parameters missing..."
+       print mode.offset,mode.length, mode.filename
+       don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+       don.write_command(0xC6C5)   #clear lock bit
+       ret_buf=don.getReturn(2)    #two bytes expected to this command                
+       sys.exit()
+    don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+    
+
+def psram_read(mode,don):
+    if mode.offset!=-1 and mode.length!=-1 and mode.filename!="":
+        if mode.version > 5:  #should never be smaller here
+            blockCount = (mode.length>>17)+1 #read this many 64K word blocks
+            mode.offset=mode.offset>>1    #make word offset
+            lastLength = mode.length&0x0001FFFF  
+            mode.length= mode.length>>1   #make word length
+            if mode.length < 512:                
+                print 'Reading %i bytes in single block '%(lastLength)
+                sys.stdout.flush()
+            else:
+                print 'Reading %iK'%(mode.length/512)
+                sys.stdout.flush()
+            try:
+                f=open(mode.filename,"wb")  #if this fails no point in reading as there is nowhere to write
+                address = mode.offset    # set word address
+                don.set_address(address)
+                i=0
+                while (i<blockCount):
+                    try:
+                        don.issue_blk_read()  # request 64K words from current address
+                        buf=don.getReturn(65536*2) #Read all words
+                    except SerialPortException:
+                        if sys.platform=='win32':
+                            print("\nExit due to driver error...")
+                            print("Please disconnect dongle and try again... \n")
+                            sys.exit()
+                        else:
+                            print("\nPlease send email to jyrit@artecdesign.ee stating your dongle version")
+                            print("disconnect the dongle and try again")
+                    if (i==blockCount-1):  #last block
+                        f.write(buf[:lastLength])
+                    else:
+                        f.write(buf) ## must tuncate the buffer
+                    if mode.v == 1:
+                        print 'Got block %i'%(i+1)
+                    else:
+                        sys.stdout.write(".")
+                        sys.stdout.flush()
+                    i+=1
+                f.close()    
+            except IOError:
+                print "IO Error on file open"
+                don.write_command(0xC6C5)   #clear lock bit
+                ret_buf=don.getReturn(2)    #two bytes expected to this command                         
+                sys.exit()                     
+        else:
+            print "Dongle PSRAM region supported since hw version 8606 on Dongle II boards"
+    
+       ##################### end before hw ver 5 readback code  ################################################ 
+    else:
+       print "Some of readback parameters missing..."
+       print mode.offset,mode.length, mode.filename
+       don.write_command(0xC6C5)   #clear lock bit
+       ret_buf=don.getReturn(2)    #two bytes expected to this command                
+       sys.exit()  
+    
+       
+def flash_qry(mode,don):
+    buf=don.read_data(4,0x0)  # word count and word address
+    don.write_command(0x0050)  #FLASH command clear status register   
+    don.write_command(0x0098)  #FLASH command read QRY
+    buf=don.read_data(3,0x000010)  # word count and word address
+    if ord(buf[0])==0x51 and  ord(buf[2])==0x52 and  ord(buf[4])==0x59:
+        buf=don.read_data(2,0x000000)  # word count and word address
+        print 'Query  OK, Flash Factory Code is: 0x%02x device: 0x%02x '%(ord(buf[0]),ord(buf[2]))
+        buf=don.read_data(2,0x000002)
+	print 'lock bit is 0x%02x 0x%02x'%(ord(buf[0]),ord(buf[1]))
+    else:
+        print "Got bad Flash query data:"
+        print 'Query address 0x10 = 0x%02x%02x '%(ord(buf[1]),ord(buf[0]))
+        print 'Query address 0x12 = 0x%02x%02x '%(ord(buf[3]),ord(buf[2]))
+        print 'Query address 0x14 = 0x%02x%02x '%(ord(buf[5]),ord(buf[4]))    
+        print "Read byte count:",len(buf)
+ 
+    don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+    buf=don.read_data(4,0xff57c0>>1)  # word count and word address
+
+    print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[1]),ord(buf[0]),ord(buf[3]),ord(buf[2]),ord(buf[5]),ord(buf[4]),ord(buf[7]),ord(buf[6]) )
+
+   
+def flash_test(mode,don):
+        print "FLASH TEST"
+        test_status = 1
+        if mode.e == 1:
+            #Erase Dongle
+            print "Erasing"
+            don.write_command(0x0060) # 0x0098
+            don.write_command(0x00D0) # 0x0098
+            don.wait_on_busy()
+            don.parse_status()
+            endBlock = 31
+            startBlock = 0
+            i=startBlock
+            while i <= endBlock:
+                if mode.v == 1:
+                    print 'Erasing block %i '%(i)
+                else:
+                     sys.stdout.write(".")
+                     sys.stdout.flush()
+                don.erase_block(i)
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
+                i=i+1  
+            if mode.v == 0: # add CRTL return to dots
+                print ""
+        #Do marching one test on data and address
+        mode.length= 0   #make word length
+        don.write_command(0x00FF) #  put flash to data read mode
+        buf2=don.read_data(1,0)  #read first byte
+        if ord(buf2[0]) != 0xFF:
+            print "Can't run FLASH TEST on unerased flash first byte is 0x%02x"%(ord(buf2[0]))
+            don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+            don.write_command(0xC6C5)   #clear lock bit
+            ret_buf=don.getReturn(2)    #two bytes expected to this command                     
+            sys.exit()        
+        try:
+            #Marching one test
+            print "Single bit high test on addr and data"
+            #---------------------------------------------------------------------------
+            address = 0x100000    # set word address
+            data = 0x100000
+            while mode.length<20: # last address to test 0x20 0000  
+                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
+                don.buffer_write(2,address,buf1)
+                don.parse_status()   #do this after programming all but uneaven ending
+                don.write_command(0x00FF) #  put flash to data read mode   
+                buf2=don.read_data(2,address)  # word count and byte address read 64 words to speed up
+                if buf1 != buf2:
+                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
+                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Data written = 0x%08x"%(data&0xFFFF)                    
+                    print "Test FAIL!!!!!"                    
+                    test_status = 0
+                buf2=don.read_data(1,0)  #read first byte
+                if ord(buf2[0]) != 0xFF:
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Test FAIL (Used address line probably const. 0)!"
+                    test_status = 0
+                    don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+                    don.write_command(0xC6C5)   #clear lock bit
+                    ret_buf=don.getReturn(2)    #two bytes expected to this command                             
+                    sys.exit()   
+                address = address >> 1
+                if address == 0x2:
+                    address = address >> 1  # 0x2 is written and will return zero on read as write new write will fail
+                data = data >> 1
+                mode.length =  mode.length + 1
+
+            #-----------------------------------------------------------------------
+            #Marching zero test
+            print "Single bit low test on addr and data"
+            address = 0xFFEFFFFF    # set word address
+            data = 0xFFEFFFFF
+            while mode.length<18: # last address to test 0x20 0000  
+                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
+                don.buffer_write(2,address,buf1)
+                don.parse_status()   #do this after programming all but uneaven ending
+                don.write_command(0x00FF) #  put flash to data read mode   
+                buf2=don.read_data(2,address&0x1FFFFF)  # word count and byte address read 64 words to speed up
+                if buf1 != buf2:
+                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
+                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Data written = 0x%08x"%(data&0xFFFF)                    
+                    print "Test FAIL!!!!!"                    
+                    print "Test FAIL!!!!!"
+                    test_status = 0
+                buf2=don.read_data(1,0x1FFFFF)  #read first byte
+                if ord(buf2[0]) != 0xFF:
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Test FAIL (At used address line const. 1 or lines bonded)!"                
+                    test_status = 0
+                    don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+                    don.write_command(0xC6C5)   #clear lock bit
+                    ret_buf=don.getReturn(2)    #two bytes expected to this command                             
+                    sys.exit()   
+                address = (address >> 1)|0xFF000000
+                data = data >> 1
+                mode.length =  mode.length + 1
+            if mode.b == 1:
+                #Erase Dongle
+                print "Erasing"
+                don.write_command(0x0060) # 0x0098
+                don.write_command(0x00D0) # 0x0098
+                don.wait_on_busy()
+                don.parse_status()
+                endBlock = 31
+                startBlock = 0
+                i=startBlock
+                while i <= endBlock:
+                    if mode.v == 1:
+                        print 'Blanking block %i '%(i)
+                    else:
+                        sys.stdout.write(".")
+                        sys.stdout.flush()
+                    don.erase_block(i)
+                    if mode.version < 5:
+                        don.wait_on_busy()
+                        don.parse_status()   #do this after programming all but uneaven ending
+                    i=i+1
+                if mode.v == 0:
+                    print " "
+            if  test_status == 1:
+                print "Test SUCCESSFUL!"
+            don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+            don.write_command(0xC6C5)   #clear lock bit
+            ret_buf=don.getReturn(2)    #two bytes expected to this command                     
+            sys.exit()  
+        except IOError:
+            print "IO Error on file open"
+            don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+            don.write_command(0xC6C5)   #clear lock bit
+            ret_buf=don.getReturn(2)    #two bytes expected to this command                     
+            sys.exit()        
+        don.write_command(0x00FF) # 0x0098  --set flash to read array mode
         
+def psram_test(mode,don):
+        print "PSRAM TEST"
+        test_status = 1
+        #Do marching one test on data and address
+        mode.length= 0   #make word length
+        try:
+            print "Single bit high test on addr and data"
+            #---------------------------------------------------------------------------
+            address = 0x100000    # set word address
+            data = 0x100000
+            don.buffer_write_ram(0,"\xFF\xFF")  #init PSRAM
+            while mode.length<20: # last address to test 0x20 0000  
+                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
+                don.buffer_write_ram(address,buf1)
+                buf2=don.read_data(2,address)  # word count and byte address read 64 words to speed up
+                if buf1 != buf2:
+                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
+                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Data written = 0x%08x"%(data&0xFFFF)                    
+                    print "Test due to data FAIL!!!!!"
+                    test_status=0
+                buf2=don.read_data(1,0)  #read first byte
+                if ord(buf2[0]) != 0xFF:
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Test FAIL (At least one address line const. 0)!!!!!"
+                    test_status=0
+                    don.write_command(0xC6C5)   #clear lock bit
+                    ret_buf=don.getReturn(2)    #two bytes expected to this command                             
+                    sys.exit()   
+                address = address >> 1
+                if address == 0x2:
+                    address = address >> 1  # 0x2 is written and will return zero on read as write new write will fail
+                data = data >> 1
+                mode.length =  mode.length + 1
+
+            #-----------------------------------------------------------------------
+            #Marching zero test
+            print "Single bit low test on addr and data"
+            address = 0xFFEFFFFF    # set word address
+            data = 0xFFEFFFFF
+            while mode.length<18: # last address to test 0x20 0000  
+                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
+                don.buffer_write_ram(address&0x1FFFFF,buf1)
+                buf2=don.read_data(2,address&0x1FFFFF)  # word count and byte address read 64 words to speed up
+                if buf1 != buf2:
+                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
+                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Data written = 0x%08x"%(data&0xFFFF)
+                    print "Test FAIL!!!!!"
+                    test_status=0
+                buf2=don.read_data(1,0x1FFFFF)  #read first byte
+                if ord(buf2[0]) != 0xFF:
+                    print "Address used = 0x%08x"%(address&0x1FFFFF)
+                    print "Test FAIL (At used address least two address lines bonded or const. 1)!"                
+                    test_status=0
+                    don.write_command(0xC6C5)   #clear lock bit
+                    ret_buf=don.getReturn(2)    #two bytes expected to this command                             
+                    sys.exit()   
+                address = (address >> 1)|0xFF000000
+                data = data >> 1
+                mode.length =  mode.length + 1
+            if test_status==1:
+                print "Test SUCCESSFUL!"
+            don.write_command(0xC6C5)   #clear lock bit
+            ret_buf=don.getReturn(2)    #two bytes expected to this command                         
+            sys.exit()  
+        except IOError:
+            print "IO Error on file open"
+            don.write_command(0xC6C5)   #clear lock bit
+            ret_buf=don.getReturn(2)    #two bytes expected to this command                     
+            sys.exit()                    
+            
+def flash_erase(mode,don):
+            #Erase Dongle
+            print "Erasing all"
+            don.write_command(0x0060) # 0x0098
+            don.write_command(0x00D0) # 0x0098
+            if mode.version < 5:
+                don.wait_on_busy()
+                don.parse_status()
+            endBlock = 31
+            startBlock = 0
+            i=startBlock
+            while i <= endBlock:
+                if mode.v == 1:
+                    print 'Erasing block %i '%(i)
+                else:
+                     sys.stdout.write(".")
+                     sys.stdout.flush()
+                don.erase_block(i)
+                if mode.version < 5:
+                    don.wait_on_busy()
+                    don.parse_status()   #do this after programming all but uneaven ending
+                i=i+1  
+            if mode.v == 0: # add CRTL return to dots
+                print "" 
+            if mode.version >= 5:
+                print "Waiting for buffers to empty"
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
+            print "Erase done."            
+            don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+def flash_looptest(mode,don):
+            print "Status Loop test"
+            i=1024
+            startTime = time.clock()
+            while i > 0:
+                if i%128==0:
+                    sys.stdout.write(".")
+                    sys.stdout.flush()
+                don.wait_on_busy()
+                don.parse_status()   #do this after programming all but uneaven ending
+                i=i-1
+            #if sys.platform=='win32':
+            endTime = (time.clock()-startTime)/1024.0
+            print "\nSystem round delay is %4f ms"%(endTime*1000.0)
+            sys.stdout.flush()    
+            don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+            
 ################## Main program #########################
 
 
@@ -973,7 +1657,13 @@ for arg in sys.argv:
             if op=="b":
                 mode.b = 1
             if op=="l":
-                mode.l = 1                      
+                mode.l = 1
+            if op=="p":
+                mode.p = 0
+            if op=="P":
+                mode.p = 1
+            if op=="u":
+                mode.u = 1                     
     else:
         i = sys.argv.index(arg)
         if i ==  last_ops + 1:
@@ -985,7 +1675,12 @@ for arg in sys.argv:
             if mode.r==1:
                 mode.length=mode.convParamStr(arg)
             else:
-                mode.address=mode.convParamStr(arg)
+                if arg.find("EOF")>-1:
+                    print "Found EOF marker"
+                    mode.eof = 1    #the file is to be written to the end of 4M area
+                    mode.address = 0
+                else:
+                    mode.address=mode.convParamStr(arg)
                 
         if i ==  last_ops + 3:
             if mode.r==1:
@@ -1014,7 +1709,7 @@ else:
     wait = (0.00025/wait) * 1.20   # count for 250us + safe margin
     # ok done
     reopened = 0
-
+    
     
     if sys.platform=='win32':
         don  = Dongle(mode.portname,256000,6000)
@@ -1030,7 +1725,7 @@ else:
     
     don.tty.wait = wait   
     while 1:
-        don.write_command(0x0050) # 0x0098
+        #don.write_command(0x0050)    #FLASH command clear status register  
         don.write_command(0x00C5)            #send dongle check internal command
         don_ret=don.testReturn(2)
         if don_ret==2:
@@ -1063,338 +1758,105 @@ else:
         mode.version = ord(buf[0])
         don.mode = mode
         print 'Dongle HW version code is  %02x %02x'%(ord(buf[1]), ord(buf[0]))
+        
+        print 'Dongle version is  %x'%(mode.version)
     else:
         don.mode = mode
         print 'Dongle HW version code is smaller than 05 some features have been improved on'
         print 'HW code and Quartus FPGA binary file are available at:' 
         print 'http://www.opencores.org/projects.cgi/web/usb_dongle_fpga/overview'
         print 'Programming is possible with Altera Quartus WE and BYTEBLASTER II cable or'
-        print 'compatible clone like X-Blaster http://www.customcircuitsolutions.com/cable.html'        
+        print 'compatible clone like X-Blaster http://www.customcircuitsolutions.com/cable.html'
     
-if mode.q == 1:   # perform a query from dongle
-    
-    buf=don.read_data(4,0x0)  # word count and word address
-    don.write_command(0x0050) # 0x0098
-    don.write_command(0x0098) # 0x0098
-    buf=don.read_data(3,0x000010)  # word count and word address
-    if ord(buf[0])==0x51 and  ord(buf[2])==0x52 and  ord(buf[4])==0x59:
-        buf=don.read_data(2,0x000000)  # word count and word address
-        print 'Query  OK, Flash Factory Code is: 0x%02x device: 0x%02x '%(ord(buf[0]),ord(buf[2]))
-        buf=don.read_data(2,0x000002)
-	print 'lock bit is 0x%02x 0x%02x'%(ord(buf[0]),ord(buf[1]))
-    else:
-        print "Got bad Flash query data:"
-        print 'Query address 0x10 = 0x%02x%02x '%(ord(buf[1]),ord(buf[0]))
-        print 'Query address 0x12 = 0x%02x%02x '%(ord(buf[3]),ord(buf[2]))
-        print 'Query address 0x14 = 0x%02x%02x '%(ord(buf[5]),ord(buf[4]))    
-        print "Read byte count:",len(buf)
- 
-    don.write_command(0x00FF) # 0x0098
-    buf=don.read_data(4,0xff57c0>>1)  # word count and word address
-
-    print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[1]),ord(buf[0]),ord(buf[3]),ord(buf[2]),ord(buf[5]),ord(buf[4]),ord(buf[7]),ord(buf[6]) )
-
-    
-    
-if mode.filename!="" and mode.address!=-1:
-    #Calculate number of blocks and start of blocks
-    size = 0
-    mode.address = mode.address>>1  #make word address
-    try:
-        f=open(mode.filename,"rb")
-        f.seek(0,2) #seek to end
-        size = f.tell()
-        f.seek(0) #seek to start
-        print 'File size %iK '%(size/1024)
-        f.close()
-    except IOError:
-         print "IO Error on file open. File missing or no premission to open."
-         sys.exit()
-    #clear blockLock bits
-    don.write_command(0x0060) # 0x0098
-    don.write_command(0x00D0) # 0x0098
-    if mode.version < 5:
-        don.wait_on_busy()
-        don.parse_status()
-    wordSize = (size+ (size&1))>> 1    # round byte count up and make word address
-    endBlock = don.get_block_no(mode.address+wordSize - 1)  
-    startBlock = don.get_block_no(mode.address)
-    if endBlock >= 32:
-        print "Given file does not fit into remaining space. File size is %i KB"%(size/1024)
-        print "Space left from given offset is %i KB"%((4*1024*1024-mode.address*2)/1024)
-        sys.exit()
-    i=startBlock
-    print 'Erasing from block %i to %i '%(i,endBlock)
-    while i <= endBlock:
-        if mode.v == 1:
-            print 'Erasing block %i '%(i)
+    if mode.version>0x19:   # Dongle II versions
+        print 'Other status info:'
+        if mode.p == 0:
+            don.write_command(0xC3C5)  # ldev_present_n set to 0   (is active low for thincan)       
+            buf_dc = don.getReturn(2)  # two bytes expected to this command    
         else:
-            sys.stdout.write(".")
-            sys.stdout.flush()
-        don.erase_block(i)
-        if mode.version < 5:
-            don.wait_on_busy()
-            don.parse_status()   #do this after programming all but uneaven ending
-        i=i+1
-    if mode.v == 0:
-        print " "
-    #don.write_command(0x00FF) # 0x0098
-    #buf=don.read_data(4,0x000000)  # word count and word address     
-    #print 'Data: 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x '%(ord(buf[0]),ord(buf[1]),ord(buf[2]),ord(buf[3]),ord(buf[4]),ord(buf[5]),ord(buf[6]),ord(buf[7]) )
-
-    f=open(mode.filename,"rb")
-    f.seek(0) #seek to start
-    address= mode.address
-    #don.set_address(address)
-    print 'Writing %iK'%(size/1024)
-    while 1:
-        if (address/(1024*64) != (address-16)/(1024*64)) and address != mode.address:  # get bytes from words if 512
-            if mode.v == 1:
-                print 'Progress: %iK of %iK at 0x%06x'%((address-mode.address)/512,size/1024,address)
+            don.write_command(0xC4C5)  # ldev_present_n set to 1 (is active low for thincan) 
+            buf_dc = don.getReturn(2)  # two bytes expected to this command                
+        if mode.u == 1:
+            don.write_command(0xC2C5)  # force USB prog mode signals to conf memory  
+            #buf_dc = don.getReturn(2)  # two bytes expected to this command                
+            sys.exit()
+        don.write_command(0x02C5)  #try getting PCB ver (works since 06 before that returns 0x3210)
+        buf=don.getReturn(2)  # two bytes expected to this command
+        i_temp = 0
+        i_temp = (ord(buf[1])<<8)|ord(buf[0])
+        print 'Dongle PCB version code is AD 67075%05i'%( i_temp )
+        don.write_command(0x03C5)            #try getting mode switch setting (works since 06 before that returns 0x3210)
+        buf=don.getReturn(2)  # two bytes expected to this command
+        mode_reg = ord(buf[0])
+        print 'Dongle memory region  %02x'%(mode_reg)
+        if ord(buf[1])==0x00:        
+            if ord(buf[0]) > 3:
+                print 'PSRAM region selected'
             else:
-                sys.stdout.write(".")
-                sys.stdout.flush()
-        buf = f.read(32)  #16 words is maximum write here bytes are read
-        if len(buf)==32:
-            don.buffer_write(16,address,buf)
-            address = address + 16
-        elif len(buf)>0:
-            don.parse_status()   #do this after programming all but uneaven ending
-            print "Doing an unaligned write..."
-            length = len(buf)
-            length = (length + (length&1))>> 1   #round up to get even word count
-            buf = buf+"\xff"   #pad just in case rounding took place
-            don.buffer_write(len,address,buf)
-            address = address + 16     #inc word address
-            break
-        else:
-            break
-    if mode.v == 0:
-        print " "
-    if mode.version >= 5:
-        print "Waiting for buffers to empty"
-        don.wait_on_busy()
-        don.parse_status()   #do this after programming all but uneaven ending        
-    print "Write DONE!"
-    don.parse_status()   #do this after programming all but uneaven ending
-    f.close()
+                print 'FLASH region selected'
+            mode.region = mode_reg  #set the region for PSRAM support                            
+    if mode.region>3:
+        pass
+        #print 'Initialize psram on region %i'%(mode.region)
+        #PSRAM mode init
+    else:
+        #print 'Initialize flash on region %i'%(mode.region)
+        don.write_command(0x0050)    #FLASH command clear status register
+        don.write_command(0x00FF) # 0x0098  --set flash to read array mode
+        #Flash mode init
+
+#Lock LPC out from memory interface        
+don.write_command(0xC5C5)   #set lock bit up
+ret_buf=don.getReturn(2)    #two bytes expected to this command
+
+if mode.q == 1:   # perform a query from dongle  
+    if mode.region<4:
+        flash_qry(mode,don)
+    else:
+        print "Query only supported on flash regions (to change region turn the Mode switch):"
+        print "FLASH regions are regions from 0 to 3"    
+    
+    
+if mode.filename!="" and mode.address!=-1:   #Dongle write command given
+    if mode.region<4:
+        print "Flash write called"
+        flash_write(mode,don)
+    else:
+        print "PSRAM write called"
+        psram_write(mode,don)
     
 if mode.r == 1:   # perform a readback
-    if mode.offset!=-1 and mode.length!=-1 and mode.filename!="":
-        if mode.version >= 5:
-            ##################### from hw ver 5 readback code ##################################################
-            blockCount = (mode.length>>17)+1 #read this many 64K word blocks
-            mode.offset=mode.offset>>1    #make word offset
-            lastLength = mode.length&0x0001FFFF  
-            mode.length= mode.length>>1   #make word length
-            if mode.length < 512:                
-                print 'Reading %i bytes in single block '%(lastLength)
-            else:
-                print 'Reading %iK in %i blocks '%(mode.length/512,blockCount)
-            don.write_command(0x00FF) #  put flash to data read mode
-            try:
-                f=open(mode.filename,"wb")  #if this fails no point in reading as there is nowhere to write
-                address = mode.offset    # set word address
-                don.set_address(address)
-                i=0
-                while (i<blockCount):
-                    don.issue_blk_read()  # request 64K words from current address
-                    buf=don.getReturn(65536*2) #Read all words
-                    if (i==blockCount-1):  #last block
-                        f.write(buf[:lastLength])
-                    else:
-                        f.write(buf) ## must tuncate the buffer
-                    if mode.v == 1:
-                        print 'Got block %i'%(i+1)
-                    else:
-                        sys.stdout.write(".")
-                        sys.stdout.flush()
-                    i+=1
-                f.close()    
-            except IOError:
-                print "IO Error on file open"
-                sys.exit()                    
-            ##################### end from hw ver 5 readback code  ############################################ 
-        else:
-            ##################### before hw ver 5 readback code ###############################################
-            mode.offset=mode.offset>>1    #make word offset
-            mode.length= mode.length>>1   #make word length
-            print 'Reading %iK'%(mode.length/512)
-            try:
-                f=open(mode.filename,"wb")
-                don.write_command(0x00FF) #  put flash to data read mode
-                address = mode.offset    # set word address
-                while 1:
-                    if address/(1024*32) != (address-128)/(1024*32):  # get K bytes from words if 512
-                        if mode.v == 1:
-                            print 'Progress: %iK of %iK'%((address-mode.offset)/512,mode.length/512)
-                        else:
-                            sys.stdout.write(".")
-                            sys.stdout.flush()
-                    buf=don.read_data(128,address)  # word count and byte address read 64 words to speed up
-                    f.write(buf)
-                    #print "from address:",address<<1," ", len(buf)
-                    if address+128 >= (mode.offset + mode.length):  # 2+64 estimates the end to end in right place
-                        break
-                    address = address + 128    #this is word address
-                f.close()
-                if mode.v == 0:
-                    print " "            
-                print "Readback done!"
-            except IOError:
-                print "IO Error on file open"
-                sys.exit()        
-       ##################### end before hw ver 5 readback code  ################################################ 
+    if mode.region<4:
+        print "Flash read called"
+        flash_read(mode,don)
     else:
-       print "Some of readback parameters missing..."
-       print mode.offset,mode.length, mode.filename
-       sys.exit()  
-
+        print "PSRAM read called"
+        psram_read(mode,don)    
+    
 if mode.t == 1:   # perform dongle test
-        print "Dongle TEST"
-        if mode.e == 1:
-            #Erase Dongle
-            print "Erasing"
-            don.write_command(0x0060) # 0x0098
-            don.write_command(0x00D0) # 0x0098
-            don.wait_on_busy()
-            don.parse_status()
-            endBlock = 31
-            startBlock = 0
-            i=startBlock
-            while i <= endBlock:
-                if mode.v == 1:
-                    print 'Erasing block %i '%(i)
-                else:
-                     sys.stdout.write(".")
-                     sys.stdout.flush()
-                don.erase_block(i)
-                don.wait_on_busy()
-                don.parse_status()   #do this after programming all but uneaven ending
-                i=i+1  
-            if mode.v == 0: # add CRTL return to dots
-                print ""
-        #Do marching one test on data and address
-        mode.length= 0   #make word length
-        try:
-            #Marching one test
-            #---------------------------------------------------------------------------
-            address = 0x100000    # set word address
-            data = 0x100000
-            while mode.length<20: # last address to test 0x20 0000  
-                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
-                don.buffer_write(2,address,buf1)
-                don.parse_status()   #do this after programming all but uneaven ending
-                don.write_command(0x00FF) #  put flash to data read mode   
-                buf2=don.read_data(2,address)  # word count and byte address read 64 words to speed up
-                if buf1 != buf2:
-                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
-                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
-                    print "Test FAIL!!!!!"
-                    sys.exit()
-                address = address >> 1
-                if address == 0x2:
-                    address = address >> 1  # 0x2 is written and will return zero on read as write new write will fail
-                data = data >> 1
-                mode.length =  mode.length + 1
-                buf2=don.read_data(1,0)  #read first byte
-                if ord(buf2[0]) != 0xFF:
-                    print "Test FAIL (At least one address line const. 0)!!!!!"
-                    sys.exit()
-            #-----------------------------------------------------------------------
-            #Marching zero test
-            address = 0xFFEFFFFF    # set word address
-            data = 0x100000
-            while mode.length<18: # last address to test 0x20 0000  
-                buf1=pack('BBBB', (0x000000FF&data),(0x0000FF00&data)>>8 ,(0x00FF0000&data)>>16 ,(0xFF0000&data)>>24 )
-                don.buffer_write(2,address,buf1)
-                don.parse_status()   #do this after programming all but uneaven ending
-                don.write_command(0x00FF) #  put flash to data read mode   
-                buf2=don.read_data(2,address&0x1FFFFF)  # word count and byte address read 64 words to speed up
-                if buf1 != buf2:
-                    print 'IN  %02x %02x %02x %02x '%(ord(buf1[3]), ord(buf1[2]),ord(buf1[1]), ord(buf1[0]))
-                    print 'OUT %02x %02x %02x %02x '%(ord(buf2[3]), ord(buf2[2]),ord(buf2[1]), ord(buf2[0]))
-                    print "Test FAIL!!!!!"
-                    sys.exit()
-                address = (address >> 1)|0xFF000000
-                data = data >> 1
-                mode.length =  mode.length + 1
-                buf2=don.read_data(1,0x1FFFFF)  #read first byte
-                if ord(buf2[0]) != 0xFF:
-                    print "Test FAIL (At least two address lines bonded)!!!!!"                
-                    sys.exit()
-            if mode.b == 1:
-                #Erase Dongle
-                print "Erasing"
-                don.write_command(0x0060) # 0x0098
-                don.write_command(0x00D0) # 0x0098
-                don.wait_on_busy()
-                don.parse_status()
-                endBlock = 31
-                startBlock = 0
-                i=startBlock
-                while i <= endBlock:
-                    if mode.v == 1:
-                        print 'Blanking block %i '%(i)
-                    else:
-                        sys.stdout.write(".")
-                        sys.stdout.flush()
-                    don.erase_block(i)
-                    if mode.version < 5:
-                        don.wait_on_busy()
-                        don.parse_status()   #do this after programming all but uneaven ending
-                    i=i+1
-                if mode.v == 0:
-                    print " "
-            print "Test SUCCESSFUL!"
-            sys.exit()  
-        except IOError:
-            print "IO Error on file open"
-            sys.exit()        
-
-if mode.e == 1:   # perform dongle test
-            #Erase Dongle
-            print "Erasing all"
-            don.write_command(0x0060) # 0x0098
-            don.write_command(0x00D0) # 0x0098
-            if mode.version < 5:
-                don.wait_on_busy()
-                don.parse_status()
-            endBlock = 31
-            startBlock = 0
-            i=startBlock
-            while i <= endBlock:
-                if mode.v == 1:
-                    print 'Erasing block %i '%(i)
-                else:
-                     sys.stdout.write(".")
-                     sys.stdout.flush()
-                don.erase_block(i)
-                if mode.version < 5:
-                    don.wait_on_busy()
-                    don.parse_status()   #do this after programming all but uneaven ending
-                i=i+1  
-            if mode.v == 0: # add CRTL return to dots
-                print "" 
-            if mode.version >= 5:
-                print "Waiting for buffers to empty"
-                don.wait_on_busy()
-                don.parse_status()   #do this after programming all but uneaven ending
-            print "Erase done."
-
-if mode.l == 1:   # perform dongle test            
-            #Erase Dongle
-            print "Status Loop test"
-            i=1024
-            startTime = time.clock()
-            while i > 0:
-                sys.stdout.write(".")
-                sys.stdout.flush()
-                don.wait_on_busy()
-                don.parse_status()   #do this after programming all but uneaven ending
-                i=i-1
-            if sys.platform=='win32':
-                endTime = (time.clock()-startTime)/1024.0
-                print "\nSystem round delay is %4f ms"%(endTime*1000.0)
-            sys.stdout.flush()
+    if mode.region<4:
+        flash_test(mode,don)
+    else:
+        psram_test(mode,don)
+if mode.e == 1:   # perform dongle erase
+    if mode.region<4:
+        flash_erase(mode,don)
+    else:
+        print "Erase is supported on flash regions (to change region turn the Mode switch):"
+        print "FLASH regions are regions from 0 to 3"    
+        
+if mode.l == 1:   # perform dongle test  
+    if mode.region<4:
+        flash_looptest(mode,don)
+    else:
+        print "Looptest is supported on flash regions (to change region turn the Mode switch):"
+        print "FLASH regions are regions from 0 to 3"            
+    
 ##########################################################
+
+#Unlock memory interface        
+don.write_command(0xC6C5)   #clear lock bit
+ret_buf=don.getReturn(2)    #two bytes expected to this command
+sys.exit()
+
+
