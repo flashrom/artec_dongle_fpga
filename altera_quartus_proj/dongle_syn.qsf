@@ -25,10 +25,10 @@
 
 set_global_assignment -name FAMILY Cyclone
 set_global_assignment -name DEVICE EP1C6T144C8
-set_global_assignment -name TOP_LEVEL_ENTITY design_top
+set_global_assignment -name TOP_LEVEL_ENTITY design_top_thincandbg
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION 6.0
 set_global_assignment -name PROJECT_CREATION_TIME_DATE "13:34:29  AUGUST 31, 2006"
-set_global_assignment -name LAST_QUARTUS_VERSION "6.0 SP1"
+set_global_assignment -name LAST_QUARTUS_VERSION 8.0
 set_global_assignment -name EDA_SIMULATION_TOOL "ModelSim (VHDL)"
 set_global_assignment -name EDA_INCLUDE_VHDL_CONFIGURATION_DECLARATION ON -section_id eda_simulation
 set_global_assignment -name EDA_OUTPUT_DATA_FORMAT VHDL -section_id eda_simulation
@@ -134,6 +134,18 @@ set_instance_assignment -name IO_STANDARD LVCMOS -to lad[0]
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[1]
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[2]
 set_instance_assignment -name IO_STANDARD LVCMOS -to lad[3]
+set_global_assignment -name FMAX_REQUIREMENT "12.5 MHz" -section_id "design_top|pc_serializer:DBG|half_clk"
+set_location_assignment PIN_131 -to fl_sts_en
+set_global_assignment -name ADD_DEFAULT_PINS_TO_SIMULATION_OUTPUT_WAVEFORMS ON
+set_global_assignment -name SIMULATION_MODE FUNCTIONAL
+set_global_assignment -name INCREMENTAL_VECTOR_INPUT_SOURCE dongle_syn.vwf
+set_global_assignment -name CHECK_OUTPUTS ON
+set_global_assignment -name SIMULATOR_GENERATE_SIGNAL_ACTIVITY_FILE ON
+set_global_assignment -name SIMULATOR_SIGNAL_ACTIVITY_FILE_OUTPUT_DESTINATION dongle_syn.saf
+set_global_assignment -name SIMULATOR_GENERATE_POWERPLAY_VCD_FILE ON
+set_global_assignment -name SIMULATOR_POWERPLAY_VCD_FILE_OUTPUT_DESTINATION dongle_syn.vcd
+set_global_assignment -name LL_ROOT_REGION ON -section_id "Root Region"
+set_global_assignment -name LL_MEMBER_STATE LOCKED -section_id "Root Region"
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to lad
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to fl_data
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to hdr
@@ -151,6 +163,11 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to usb_rd_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 2MA -to usb_wr
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to hdr[3]
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to hdr[5]
+set_instance_assignment -name CLOCK_SETTINGS for33 -to for33
+set_instance_assignment -name CLOCK_SETTINGS for25sys -to for25sys
+set_instance_assignment -name CLOCK_SETTINGS "design_top|pc_serializer:DBG|half_clk" -to "pc_serializer:DBG|half_clk"
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to hdr[7]
+set_global_assignment -name VHDL_FILE ../src/design_top/design_top_thincandbg.vhd
 set_global_assignment -name VHDL_FILE ../src/postcode_ser/fifo.vhd
 set_global_assignment -name VHDL_FILE ../src/postcode_ser/pc_serializer.vhd
 set_global_assignment -name VHDL_FILE ../src/usb/usb2mem.vhd
@@ -159,9 +176,3 @@ set_global_assignment -name VHDL_FILE ../src/flash/flsh_if.vhd
 set_global_assignment -name VHDL_FILE ../src/led_sys/led_coder.vhd
 set_global_assignment -name VHDL_FILE ../src/led_sys/byte_scan_mux.vhd
 set_global_assignment -name VHDL_FILE ../src/led_sys/led_sys.vhd
-set_global_assignment -name VHDL_FILE ../src/design_top/design_top_thincandbg.vhd
-set_global_assignment -name FMAX_REQUIREMENT "12.5 MHz" -section_id "design_top|pc_serializer:DBG|half_clk"
-set_instance_assignment -name CLOCK_SETTINGS for33 -to for33
-set_instance_assignment -name CLOCK_SETTINGS for25sys -to for25sys
-set_instance_assignment -name CLOCK_SETTINGS "design_top|pc_serializer:DBG|half_clk" -to "pc_serializer:DBG|half_clk"
-set_location_assignment PIN_131 -to fl_sts_en
