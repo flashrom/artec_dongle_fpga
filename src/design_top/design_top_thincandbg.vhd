@@ -58,7 +58,7 @@ use ieee.std_logic_1164.all;
 use IEEE.std_logic_unsigned.all;
 use IEEE.std_logic_arith.all;
 
-entity design_top is
+entity design_top_thincandbg is
   port (
 	--system signals
 	sys_clk    : in    std_logic;         --25 MHz clk
@@ -92,11 +92,11 @@ entity design_top is
     usb_rxf_n  : in   std_logic;  -- rx fifo has data if low
     usb_bd     : inout  std_logic_vector(7 downto 0) --bus data
     );
-end design_top;
+end design_top_thincandbg;
 
 
 
-architecture rtl of design_top is
+architecture rtl of design_top_thincandbg is
 
 component led_sys   --toplevel for led system
   generic(
@@ -266,6 +266,7 @@ signal    dbg_full : STD_LOGIC;   --write not read
 signal	  dbg_almost_full	: STD_LOGIC;
 signal	  dbg_usedw		: STD_LOGIC_VECTOR (12 DOWNTO 0);
 
+signal    force_4meg_n    : std_logic;
 signal    dbg_usb_mode_en    : std_logic;
 signal    usb_mode_en    : std_logic;
 signal    mem_idle   : std_logic;
@@ -278,7 +279,7 @@ signal    umem_cmd   : std_logic;
 signal    enable_4meg: std_logic;
 signal    dongle_con_n : std_logic;
 
-constant dongle_ver  : std_logic_vector(15 downto 0):=x"8605";
+constant dongle_ver  : std_logic_vector(15 downto 0):=x"8606";
 --END USB signals
 
 begin
@@ -304,6 +305,10 @@ hdr(4)<= '0';
 dbg_usb_mode_en <= not hdr(5);  --weak pullup on hdr(5) paired with hdr(4)
 usb_mode_en <= not dbg_usb_mode_en;  
 
+-- when jumper on pins 9,10 then 4M window is forced
+hdr(6)<= '0';
+force_4meg_n <= hdr(7);  --weak pullup on hdr(7) paired with hdr(6)
+
 --GPIO PINS END
 
 --LED SUBSYSTEM START
@@ -321,7 +326,8 @@ LEDS: led_sys   --toplevel for led system
  	msn_lob => "10111111",--0  --Most signif. of hi byte   This is version code
 	--lsn_lob => "01001111" --3   --Least signif. of hi byte	This is version code
 	--lsn_lob => "01100110" --4   --Least signif. of hi byte	This is version code
-    lsn_lob => "01101101" --5    --sync with dongle version const.  Least signif. of hi byte This is version code
+    --lsn_lob => "01101101" --5    --sync with dongle version const.  Least signif. of hi byte This is version code
+    lsn_lob => "01111101" --6    --sync with dongle version const.  Least signif. of hi byte This is version code
 	
   )
   port map(
@@ -444,6 +450,10 @@ LPCBUS : lpc_iow
 					dongle_con_n <='1';  -- pin 3 in GPIO make it 1
 				elsif lpc_addr(7 downto 0)=x"88" and lpc_data_o=x"D0" then --Set Dongle attached signal
 					dongle_con_n <='0';  -- pin 3 in GPIO make it 1										
+				end if;
+			else
+				if force_4meg_n='0' then -- active low (always force when jumper on)
+					enable_4meg <='1';
 				end if;
 			end if;
   		end if;
